@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+from pydantic import BaseModel
+
+class AssetCreate(BaseModel):
+    name: str
+    ip: str
+    mac: str = ""
+    type: str = "服务器"
+    os: str = ""
+    risk: str = "中危"
+    unit_id: str
+    ports: str = ""
+    services: str = ""
+    location: str = ""
+    isp: str = ""
+    raw_data: list[dict[str, Any]] = []
+
+class AssetUpdate(BaseModel):
+    name: str
+    ip: str
+    mac: str = ""
+    type: str = "服务器"
+    os: str = ""
+    risk: str = "中危"
+    unit_id: str
+    ports: str = ""
+    services: str = ""
+    location: str = ""
+    isp: str = ""
+
+class AssetRead(BaseModel):
+    id: str
+    name: str
+    ip: str
+    mac: str
+    type: str
+    os: str
+    risk: str
+    unit_id: str
+    vuln_ids: list[str]
+    ports: str
+    services: str
+    location: str
+    isp: str
+    raw_data: list[dict[str, Any]]
+    last_seen: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AssetChangeRead(BaseModel):
+    id: str
+    asset_id: str
+    unit_id: str
+    ip: str
+    source: str
+    action: str
+    changes: dict[str, Any]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

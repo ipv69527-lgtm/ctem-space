@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+*.whl
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker
+data/
+backups/
+releases/
+*.tar.gz
+*.dump
+*.meta
+
+# Runtime reports
+/reports/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# OMC
+.omc/
+prototype/
+
+# Local agent/editor state
+.claude/
+.codex/

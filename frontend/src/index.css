@@ -1,0 +1,37 @@
+/* Apple-style global reset */
+:root {
+  --blue: #007AFF;
+  --red: #FF3B30;
+  --orange: #FF9500;
+  --green: #34C759;
+  --gray-bg: #f2f2f7;
+  --gray-50: #f5f5fa;
+  --gray-100: #e5e5ea;
+  --gray-200: #d1d1d6;
+  --gray-500: #8e8e93;
+  --gray-700: #48484a;
+  --gray-900: #1c1c1e;
+  --header-h: 52px;
+  --sidebar-w: 248px;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'PingFang SC', 'Helvetica Neue', sans-serif;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--gray-bg);
+  color: var(--gray-900);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,.25); }
