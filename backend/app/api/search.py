@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.asset import Asset
@@ -20,20 +20,52 @@ async def global_search(
     keyword = q.strip()
     if not keyword:
         return {"units": [], "assets": [], "vulns": [], "total": 0}
+    pattern = f"%{keyword}%"
 
     unit_result = await db.execute(
         select(Unit)
-        .where(Unit.name.ilike(f"%{keyword}%") | Unit.code.ilike(f"%{keyword}%"))
+        .where(
+            or_(
+                Unit.name.ilike(pattern),
+                Unit.code.ilike(pattern),
+                Unit.desc.ilike(pattern),
+                Unit.contact.ilike(pattern),
+                Unit.region_name.ilike(pattern),
+                func.array_to_string(Unit.ip_ranges, " ").ilike(pattern),
+                func.array_to_string(Unit.aliases, " ").ilike(pattern),
+                func.array_to_string(Unit.keywords, " ").ilike(pattern),
+            )
+        )
         .limit(8)
     )
     asset_result = await db.execute(
         select(Asset)
-        .where(Asset.name.ilike(f"%{keyword}%") | Asset.ip.ilike(f"%{keyword}%"))
+        .where(
+            or_(
+                Asset.name.ilike(pattern),
+                Asset.ip.ilike(pattern),
+                Asset.mac.ilike(pattern),
+                Asset.type.ilike(pattern),
+                Asset.os.ilike(pattern),
+                Asset.ports.ilike(pattern),
+                Asset.services.ilike(pattern),
+                Asset.location.ilike(pattern),
+                Asset.isp.ilike(pattern),
+            )
+        )
         .limit(8)
     )
     vuln_result = await db.execute(
         select(Vulnerability)
-        .where(Vulnerability.title.ilike(f"%{keyword}%") | Vulnerability.cve.ilike(f"%{keyword}%"))
+        .where(
+            or_(
+                Vulnerability.title.ilike(pattern),
+                Vulnerability.cve.ilike(pattern),
+                Vulnerability.desc.ilike(pattern),
+                Vulnerability.solution.ilike(pattern),
+                Vulnerability.status_note.ilike(pattern),
+            )
+        )
         .limit(8)
     )
 

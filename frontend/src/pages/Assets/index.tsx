@@ -1,8 +1,8 @@
 import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Popover, Checkbox, Tooltip, Modal, Form, message, DatePicker } from 'antd';
 import { ApartmentOutlined, CloudDownloadOutlined, DesktopOutlined, EditOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { useState, type Key } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState, type Key } from 'react';
 import apiClient from '@/api/client';
 import type { Asset, Unit } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
@@ -117,9 +117,10 @@ function normalizeQueryValues(values: any) {
 
 export default function Assets() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const currentUser = useAuthStore(s => s.user);
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(searchParams.get('q') || '');
   const [unitId, setUnitId] = useState('');
   const [type, setType] = useState('');
   const [risk, setRisk] = useState('');
@@ -137,6 +138,11 @@ export default function Assets() {
   const [batchUnitForm] = Form.useForm();
   const [queryForm] = Form.useForm();
   const canEdit = currentUser?.role === 'super_admin' || currentUser?.role === 'operator';
+
+  useEffect(() => {
+    const nextQ = searchParams.get('q') || '';
+    setQ(nextQ);
+  }, [searchParams]);
 
   const { data: assets, isLoading, refetch } = useQuery<Asset[]>({
     queryKey: ['assets', q, unitId, type, risk, port, service, location, hasVulns],

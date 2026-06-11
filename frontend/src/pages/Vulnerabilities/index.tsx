@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Modal, Form, message } from 'antd';
 import { SafetyOutlined, SearchOutlined, ExpandAltOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import apiClient from '@/api/client';
 import type { Vulnerability, Asset, Unit } from '@/types';
 
@@ -19,8 +20,9 @@ const severityColors: Record<string, string> = { 严重: 'red', 高危: 'orange'
 
 export default function Vulnerabilities() {
   const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
   const [form] = Form.useForm();
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(searchParams.get('q') || '');
   const [severity, setSeverity] = useState('');
   const [status, setStatus] = useState('');
   const [unitId, setUnitId] = useState('');
@@ -28,6 +30,11 @@ export default function Vulnerabilities() {
   const [ip, setIp] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingVuln, setEditingVuln] = useState<Vulnerability | null>(null);
+
+  useEffect(() => {
+    const nextQ = searchParams.get('q') || '';
+    setQ(nextQ);
+  }, [searchParams]);
 
   const { data: vulns, isLoading } = useQuery<Vulnerability[]>({
     queryKey: ['vulns', q, severity, status, unitId, assetId, ip],
