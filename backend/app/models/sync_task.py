@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional
 from sqlalchemy import String, Text, DateTime, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -8,7 +9,7 @@ class SyncTask(Base):
     __tablename__ = "sync_tasks"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    unit_id: Mapped[str] = mapped_column(String(36), ForeignKey("units.id", ondelete="CASCADE"), nullable=False, index=True)
+    unit_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("units.id", ondelete="SET NULL"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(16), default="pending")
     message: Mapped[str] = mapped_column(Text, default="")
     query_condition: Mapped[str] = mapped_column(Text, default="", nullable=False)

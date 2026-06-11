@@ -11,7 +11,7 @@ class AssetCreate(BaseModel):
     type: str = "服务器"
     os: str = ""
     risk: str = "中危"
-    unit_id: str
+    unit_id: Optional[str] = None
     ports: str = ""
     services: str = ""
     location: str = ""
@@ -25,7 +25,7 @@ class AssetUpdate(BaseModel):
     type: str = "服务器"
     os: str = ""
     risk: str = "中危"
-    unit_id: str
+    unit_id: Optional[str] = None
     ports: str = ""
     services: str = ""
     location: str = ""
@@ -39,7 +39,7 @@ class AssetRead(BaseModel):
     type: str
     os: str
     risk: str
-    unit_id: str
+    unit_id: Optional[str] = None
     vuln_ids: list[str]
     ports: str
     services: str
@@ -56,7 +56,7 @@ class AssetRead(BaseModel):
 class AssetChangeRead(BaseModel):
     id: str
     asset_id: str
-    unit_id: str
+    unit_id: Optional[str] = None
     ip: str
     source: str
     action: str

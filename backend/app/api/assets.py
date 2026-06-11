@@ -16,7 +16,9 @@ ASSET_RISKS = {"严重", "高危", "中危", "低危"}
 ASSET_EDIT_FIELDS = ("name", "ip", "mac", "type", "os", "risk", "unit_id", "ports", "services", "location", "isp")
 
 
-async def _ensure_asset_unit(db: AsyncSession, unit_id: str) -> None:
+async def _ensure_asset_unit(db: AsyncSession, unit_id: str | None) -> None:
+    if not unit_id:
+        return
     unit_result = await db.execute(select(Unit).where(Unit.id == unit_id))
     if not unit_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="目标单位不存在")
@@ -63,7 +65,9 @@ async def list_assets(
         stmt = stmt.where(Asset.type == type)
     if risk:
         stmt = stmt.where(Asset.risk == risk)
-    if unit_id:
+    if unit_id == "__unassigned":
+        stmt = stmt.where(Asset.unit_id.is_(None))
+    elif unit_id:
         stmt = stmt.where(Asset.unit_id == unit_id)
     if port:
         stmt = stmt.where(Asset.ports.ilike(f"%{port}%"))
@@ -151,8 +155,10 @@ async def create_asset(
 ):
     if body.risk not in ASSET_RISKS:
         raise HTTPException(status_code=400, detail="不支持的资产风险等级")
-    await _ensure_asset_unit(db, body.unit_id)
-    asset = Asset(**body.model_dump())
+    values = body.model_dump()
+    values["unit_id"] = values.get("unit_id") or None
+    await _ensure_asset_unit(db, values["unit_id"])
+    asset = Asset(**values)
     db.add(asset)
     await db.flush()
     await write_audit_log(
@@ -180,14 +186,18 @@ async def update_asset(
 ):
     if body.risk not in ASSET_RISKS:
         raise HTTPException(status_code=400, detail="不支持的资产风险等级")
-    await _ensure_asset_unit(db, body.unit_id)
+    values = body.model_dump()
+    values["unit_id"] = values.get("unit_id") or None
+    await _ensure_asset_unit(db, values["unit_id"])
     result = await db.execute(select(Asset).where(Asset.id == asset_id))
     asset = result.scalar_one_or_none()
     if not asset:
         raise HTTPException(status_code=404, detail="资产不存在")
 
     changes = _asset_edit_changes(asset, body)
-    for field, value in body.model_dump().items():
+    if (asset.unit_id or "") != (values["unit_id"] or ""):
+        changes["unit_id"] = {"before": asset.unit_id or "", "after": values["unit_id"] or ""}
+    for field, value in values.items():
         setattr(asset, field, value)
     if changes:
         db.add(

@@ -12,7 +12,7 @@ from app.models.space_config import SpaceConfig
 from app.models.sync_task import SyncTask
 from app.models.unit import Unit
 from app.models.user import User
-from app.schemas.sync import SpaceConfigRead, SpaceConfigUpdate
+from app.schemas.sync import SpaceConfigRead, SpaceConfigUpdate, SpaceQueryRequest
 from app.services.audit import write_audit_log
 from app.services.auth import require_admin, require_operator, require_reader
 from app.services.space_sync import (
@@ -21,6 +21,7 @@ from app.services.space_sync import (
     create_due_sync_tasks,
     fetch_space_payload,
     fetch_rayspace_assets,
+    build_rayspace_query,
     run_space_sync,
     space_candidate_paths,
     space_request_options,
@@ -64,6 +65,68 @@ def _enqueue_sync_task(task_id: str, background_tasks: BackgroundTasks) -> str:
     except Exception:
         background_tasks.add_task(run_space_sync, task_id)
         return "同步任务已提交到本地后台执行"
+
+
+async def _unit_from_optional_id(db: AsyncSession, unit_id: str | None) -> Unit | None:
+    unit_id = (unit_id or "").strip()
+    if not unit_id:
+        return None
+    result = await db.execute(select(Unit).where(Unit.id == unit_id))
+    unit = result.scalar_one_or_none()
+    if not unit:
+        raise HTTPException(status_code=404, detail="目标单位不存在")
+    return unit
+
+
+def _query_payload(body: SpaceQueryRequest, unit: Unit | None) -> str:
+    query = build_rayspace_query(
+        unit=unit,
+        advanced_query=body.advanced_query,
+        startdate=body.startdate,
+        enddate=body.enddate,
+        province=body.province,
+        city=body.city,
+        county=body.county,
+        country=body.country,
+        domain=body.domain,
+        ip=body.ip,
+        ports=body.ports,
+        protocol=body.protocol,
+        service=body.service,
+        status=body.status,
+        asn=body.asn,
+        isp=body.isp,
+        category=body.category,
+        category_main=body.category_main,
+        category_sub=body.category_sub,
+        device_type=body.device_type,
+        device_category=body.device_category,
+        os_type=body.os_type,
+        os=body.os,
+        support_type=body.support_type,
+        support_category=body.support_category,
+        support_service=body.support_service,
+        middleware=body.middleware,
+        product=body.product,
+        title=body.title,
+        banner=body.banner,
+        header=body.header,
+        body=body.body,
+        server=body.server,
+        http_status=body.http_status,
+        cve=body.cve,
+        cve_name=body.cve_name,
+        poc=body.poc,
+        tag=body.tag,
+        custom_tag=body.custom_tag,
+        industry=body.industry,
+        dept=body.dept,
+        ip_company_full=body.ip_company_full,
+        keyword=body.keyword,
+    )
+    if not query:
+        raise HTTPException(status_code=400, detail="请至少填写一个查询条件")
+    return query
 
 
 @router.get("/config", response_model=SpaceConfigRead)
@@ -260,7 +323,7 @@ async def test_connection(
         if not unit:
             return {"ok": False, "message": "RaySpace 登录配置已保存，请先创建单位后再按单位范围测试数据查询"}
         try:
-            assets = await fetch_rayspace_assets(config, unit)
+            assets = await fetch_rayspace_assets(config, unit=unit)
             await write_audit_log(
                 db,
                 action="sync.test_connection",
@@ -377,6 +440,49 @@ async def trigger_sync(
     }
 
 
+@router.post("/query-preview")
+async def preview_query(
+    body: SpaceQueryRequest,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_operator),
+):
+    unit = await _unit_from_optional_id(db, body.unit_id)
+    query = _query_payload(body, unit)
+    return {"query_condition": query}
+
+
+@router.post("/query-trigger")
+async def trigger_query_sync(
+    body: SpaceQueryRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_operator),
+):
+    config = await _get_or_create_config(db)
+    if (config.auth_type or "").lower() != "rayspace":
+        raise HTTPException(status_code=400, detail="条件拉取目前仅支持 RaySpace 查询语法")
+    unit = await _unit_from_optional_id(db, body.unit_id)
+    query = _query_payload(body, unit)
+    task = SyncTask(unit_id=unit.id if unit else None, status="pending", message="条件拉取等待执行", query_condition=query)
+    db.add(task)
+    await db.flush()
+    await write_audit_log(
+        db,
+        action="sync.query_trigger",
+        target_type="sync_query",
+        target_id=task.id,
+        target_name=unit.name if unit else "未指定单位条件拉取",
+        detail={"task_id": task.id, "unit_id": task.unit_id, "query_condition": query},
+        user=current_user,
+        request=request,
+    )
+    await db.commit()
+    await db.refresh(task)
+    message = _enqueue_sync_task(task.id, background_tasks)
+    return {"ok": True, "task_id": task.id, "unit_id": task.unit_id, "status": task.status, "query_condition": query, "message": message}
+
+
 @router.post("/retry/{task_id}")
 async def retry_sync(
     task_id: str,
@@ -390,15 +496,13 @@ async def retry_sync(
     if not source_task:
         raise HTTPException(status_code=404, detail="同步任务不存在")
 
-    unit_result = await db.execute(select(Unit).where(Unit.id == source_task.unit_id))
-    unit = unit_result.scalar_one_or_none()
-    if not unit:
-        raise HTTPException(status_code=404, detail="单位不存在")
+    unit = await _unit_from_optional_id(db, source_task.unit_id)
 
     task = SyncTask(
         unit_id=source_task.unit_id,
         status="pending",
         message=f"由任务 {source_task.id} 重试",
+        query_condition=source_task.query_condition,
     )
     db.add(task)
     await db.flush()
@@ -407,8 +511,8 @@ async def retry_sync(
         action="sync.retry",
         target_type="sync_task",
         target_id=source_task.id,
-        target_name=unit.name,
-        detail={"new_task_id": task.id, "unit_id": unit.id},
+        target_name=unit.name if unit else "条件拉取任务",
+        detail={"new_task_id": task.id, "unit_id": task.unit_id},
         user=current_user,
         request=request,
     )

@@ -18,7 +18,7 @@ class Asset(Base):
     type: Mapped[str] = mapped_column(String(64), default="服务器")
     os: Mapped[str] = mapped_column(String(256), default="")
     risk: Mapped[str] = mapped_column(String(16), default="中危")
-    unit_id: Mapped[str] = mapped_column(String(36), ForeignKey("units.id", ondelete="CASCADE"), nullable=False, index=True)
+    unit_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("units.id", ondelete="SET NULL"), nullable=True, index=True)
     vuln_ids: Mapped[list] = mapped_column(ARRAY(String), default=[])
     ports: Mapped[str] = mapped_column(String(512), default="")
     services: Mapped[str] = mapped_column(Text, default="")

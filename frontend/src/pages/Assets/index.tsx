@@ -1,5 +1,5 @@
-import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Popover, Checkbox, Tooltip, Modal, Form, message } from 'antd';
-import { DesktopOutlined, EditOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Popover, Checkbox, Tooltip, Modal, Form, message, DatePicker } from 'antd';
+import { CloudDownloadOutlined, DesktopOutlined, EditOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
@@ -59,6 +59,62 @@ function loadVisibleColumns() {
   return DEFAULT_VISIBLE_COLUMNS;
 }
 
+function listFromText(value: unknown) {
+  return String(value || '')
+    .split(/[,，;；\s\n\r]+/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeQueryValues(values: any) {
+  const timeRange = Array.isArray(values.time_range) ? values.time_range : [];
+  return {
+    unit_id: values.unit_id || null,
+    advanced_query: values.advanced_query || '',
+    startdate: timeRange[0] ? timeRange[0].format('YYYY-MM-DD HH:mm:ss') : '',
+    enddate: timeRange[1] ? timeRange[1].format('YYYY-MM-DD HH:mm:ss') : '',
+    province: values.province || '',
+    city: values.city || '',
+    county: values.county || '',
+    country: values.country || '',
+    domain: values.domain || '',
+    ip: values.ip || '',
+    ports: listFromText(values.ports),
+    protocol: values.protocol || '',
+    service: values.service || '',
+    status: values.status || '',
+    asn: values.asn || '',
+    isp: values.isp || '',
+    category: values.category || '',
+    category_main: values.category_main || '',
+    category_sub: values.category_sub || '',
+    device_type: values.device_type || '',
+    device_category: values.device_category || '',
+    os_type: values.os_type || '',
+    os: values.os || '',
+    support_type: values.support_type || '',
+    support_category: values.support_category || '',
+    support_service: values.support_service || '',
+    middleware: values.middleware || '',
+    product: values.product || '',
+    title: values.title || '',
+    banner: values.banner || '',
+    header: values.header || '',
+    body: values.body || '',
+    server: values.server || '',
+    http_status: values.http_status || '',
+    cve: values.cve || '',
+    cve_name: values.cve_name || '',
+    poc: values.poc || '',
+    tag: values.tag || '',
+    custom_tag: values.custom_tag || '',
+    industry: values.industry || '',
+    dept: values.dept || '',
+    ip_company_full: values.ip_company_full || '',
+    keyword: values.keyword || '',
+  };
+}
+
 export default function Assets() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -73,7 +129,10 @@ export default function Assets() {
   const [hasVulns, setHasVulns] = useState('');
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumns);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [queryModalOpen, setQueryModalOpen] = useState(false);
+  const [previewQuery, setPreviewQuery] = useState('');
   const [form] = Form.useForm();
+  const [queryForm] = Form.useForm();
   const canEdit = currentUser?.role === 'super_admin' || currentUser?.role === 'operator';
 
   const { data: assets, isLoading, refetch } = useQuery<Asset[]>({
@@ -103,6 +162,10 @@ export default function Assets() {
 
   const unitNameById = new Map((units || []).map(unit => [unit.id, unit.name]));
   const hasFilters = Boolean(q || unitId || type || risk || port || service || location || hasVulns);
+  const unitOptions = [
+    { value: '__unassigned', label: '未归属' },
+    ...(units || []).map(unit => ({ value: unit.id, label: unit.name })),
+  ];
 
   const updateMutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: any }) => apiClient.put(`/assets/${id}`, body),
@@ -115,6 +178,26 @@ export default function Assets() {
       queryClient.invalidateQueries({ queryKey: ['asset-changes', res.data.id] });
     },
     onError: (err: any) => message.error(err.response?.data?.detail || '保存失败'),
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: (values: any) => apiClient.post('/sync/query-preview', normalizeQueryValues(values)),
+    onSuccess: (res: any) => setPreviewQuery(res.data?.query_condition || ''),
+    onError: (err: any) => message.error(err.response?.data?.detail || '查询条件生成失败'),
+  });
+
+  const triggerQueryMutation = useMutation({
+    mutationFn: (values: any) => apiClient.post('/sync/query-trigger', normalizeQueryValues(values)),
+    onSuccess: (res: any) => {
+      message.success(res.data?.message || '条件拉取任务已提交');
+      setQueryModalOpen(false);
+      setPreviewQuery('');
+      queryForm.resetFields();
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['assets'] });
+      }, 3000);
+    },
+    onError: (err: any) => message.error(err.response?.data?.detail || '条件拉取任务提交失败'),
   });
 
   const resetFilters = () => {
@@ -164,7 +247,7 @@ export default function Assets() {
   const allColumns = [
     { title: '名称', dataIndex: 'name', key: 'name', render: (v: string, r: Asset) => <a onClick={() => navigate(`/assets/${r.id}`)}>{v}</a> },
     { title: 'IP', dataIndex: 'ip', key: 'ip', render: (v: string) => <code>{v}</code> },
-    { title: '单位名称', dataIndex: 'unit_id', key: 'unit_name', render: (v: string) => unitNameById.get(v) || '-' },
+    { title: '单位名称', dataIndex: 'unit_id', key: 'unit_name', render: (v: string | null) => v ? (unitNameById.get(v) || '-') : <Tag>未归属</Tag> },
     { title: '类型', dataIndex: 'type', key: 'type' },
     { title: '端口', dataIndex: 'ports', key: 'ports', ellipsis: true, render: (v: string) => v ? <code>{v}</code> : '-' },
     { title: '服务', dataIndex: 'services', key: 'services', ellipsis: true, render: (v: string) => v || '-' },
@@ -225,7 +308,7 @@ export default function Assets() {
         <Input prefix={<SearchOutlined />} placeholder="IP/名称/端口/服务..." value={q} onChange={e => setQ(e.target.value)}
           style={{ width: 240, borderRadius: 10 }} allowClear />
         <Select placeholder="单位名称" value={unitId || undefined} onChange={value => setUnitId(value || '')} style={{ width: 180 }} allowClear
-          options={(units || []).map(unit => ({ value: unit.id, label: unit.name }))} showSearch optionFilterProp="label" />
+          options={unitOptions} showSearch optionFilterProp="label" />
         <Select placeholder="类型" value={type || undefined} onChange={value => setType(value || '')} style={{ width: 130 }} allowClear
           options={['服务器','网络设备','安全设备','工控设备'].map(v=>({value:v,label:v}))} />
         <Select placeholder="风险等级" value={risk || undefined} onChange={value => setRisk(value || '')} style={{ width: 130 }} allowClear
@@ -236,6 +319,7 @@ export default function Assets() {
         <Select placeholder="漏洞" value={hasVulns || undefined} onChange={value => setHasVulns(value || '')} style={{ width: 130 }} allowClear
           options={[{ value: 'yes', label: '有关联漏洞' }, { value: 'no', label: '无关联漏洞' }]} />
         <Button icon={<ReloadOutlined />} onClick={() => refetch()}>刷新</Button>
+        {canEdit && <Button type="primary" icon={<CloudDownloadOutlined />} onClick={() => setQueryModalOpen(true)}>条件拉取</Button>}
         <Button disabled={!hasFilters} onClick={resetFilters}>重置</Button>
         <Popover content={columnConfig} trigger="click" placement="bottomRight">
           <Tooltip title="列配置">
@@ -265,10 +349,11 @@ export default function Assets() {
             <Form.Item name="ip" label="IP 地址" rules={[{ required: true, message: '请输入 IP 地址' }]}>
               <Input placeholder="如：192.168.1.10" />
             </Form.Item>
-            <Form.Item name="unit_id" label="所属单位" rules={[{ required: true, message: '请选择所属单位' }]}>
+            <Form.Item name="unit_id" label="所属单位">
               <Select
-                placeholder="选择单位"
+                placeholder="未选择则保持未归属"
                 showSearch
+                allowClear
                 optionFilterProp="label"
                 options={(units || []).map(unit => ({ value: unit.id, label: unit.name }))}
               />
@@ -298,6 +383,187 @@ export default function Assets() {
           <Form.Item name="location" label="位置">
             <Input placeholder="如：安徽 / 合肥 / 蜀山区" />
           </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="按条件拉取资产"
+        open={queryModalOpen}
+        onCancel={() => { setQueryModalOpen(false); setPreviewQuery(''); queryForm.resetFields(); }}
+        footer={[
+          <Button key="cancel" onClick={() => { setQueryModalOpen(false); setPreviewQuery(''); queryForm.resetFields(); }}>取消</Button>,
+          <Button key="preview" loading={previewMutation.isPending} onClick={() => queryForm.validateFields().then(values => previewMutation.mutate(values))}>预览查询</Button>,
+          <Button key="submit" type="primary" loading={triggerQueryMutation.isPending} onClick={() => queryForm.validateFields().then(values => triggerQueryMutation.mutate(values))}>提交拉取</Button>,
+        ]}
+        width={840}
+      >
+        <Form form={queryForm} layout="vertical" initialValues={{ protocol: '', category: '', support_type: '', status: '' }}>
+          <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+            归属单位可不选；未能自动匹配单位的资产会进入未归属资产池，可在资产管理中人工修正。
+          </Typography.Paragraph>
+          <Typography.Text strong>资产范围</Typography.Text>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px', marginTop: 10 }}>
+            <Form.Item name="unit_id" label="限定单位（可选）">
+              <Select
+                placeholder="不限定单位"
+                showSearch
+                allowClear
+                optionFilterProp="label"
+                options={(units || []).map(unit => ({ value: unit.id, label: unit.name }))}
+              />
+            </Form.Item>
+            <Form.Item name="time_range" label="发现时间范围" style={{ gridColumn: 'span 2' }}>
+              <DatePicker.RangePicker
+                showTime
+                format="YYYY-MM-DD HH:mm:ss"
+                placeholder={['开始时间', '结束时间']}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+            <Form.Item name="dept" label="资产单位">
+              <Input placeholder="RaySpace dept" />
+            </Form.Item>
+            <Form.Item name="ip_company_full" label="单位全称">
+              <Input placeholder="RaySpace ip_company_full" />
+            </Form.Item>
+            <Form.Item name="industry" label="行业">
+              <Input placeholder="如：教育 / 金融" />
+            </Form.Item>
+          </div>
+
+          <Typography.Text strong>定位与网络</Typography.Text>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px', marginTop: 10 }}>
+            <Form.Item name="country" label="国家">
+              <Input placeholder="如：中国" />
+            </Form.Item>
+            <Form.Item name="province" label="省份">
+              <Input placeholder="如：安徽" />
+            </Form.Item>
+            <Form.Item name="city" label="城市">
+              <Input placeholder="如：合肥" />
+            </Form.Item>
+            <Form.Item name="county" label="区县">
+              <Input placeholder="如：蜀山区" />
+            </Form.Item>
+            <Form.Item name="asn" label="ASN">
+              <Input placeholder="如：AS4808" />
+            </Form.Item>
+            <Form.Item name="isp" label="运营商">
+              <Input placeholder="如：电信" />
+            </Form.Item>
+            <Form.Item name="domain" label="域名">
+              <Input placeholder="多个用逗号分隔" />
+            </Form.Item>
+            <Form.Item name="ports" label="端口">
+              <Input placeholder="如：80,443,8080" />
+            </Form.Item>
+            <Form.Item name="service" label="服务">
+              <Input placeholder="如：http / https / ssh" />
+            </Form.Item>
+            <Form.Item name="protocol" label="协议">
+              <Select allowClear options={[{ value: 'tcp', label: 'tcp' }, { value: 'udp', label: 'udp' }]} />
+            </Form.Item>
+            <Form.Item name="support_type" label="服务类型">
+              <Select
+                allowClear
+                showSearch
+                options={['中间件', '数据库', 'Web 容器', '编程语言', '框架', '应用服务'].map(value => ({ value, label: value }))}
+              />
+            </Form.Item>
+            <Form.Item name="status" label="端口状态">
+              <Select allowClear options={[{ value: 'open', label: 'open' }, { value: 'closed', label: 'closed' }]} />
+            </Form.Item>
+          </div>
+
+          <Typography.Text strong>分类与指纹</Typography.Text>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px', marginTop: 10 }}>
+            <Form.Item name="support_category" label="服务类别">
+              <Input placeholder="如：Web 容器" />
+            </Form.Item>
+            <Form.Item name="support_service" label="支撑服务名称">
+              <Input placeholder="如：Nginx" />
+            </Form.Item>
+            <Form.Item name="middleware" label="中间件">
+              <Input placeholder="如：Tomcat" />
+            </Form.Item>
+            <Form.Item name="product" label="组件/产品">
+              <Input placeholder="如：Nginx / Apache" />
+            </Form.Item>
+            <Form.Item name="category" label="一级分类">
+              <Select allowClear options={['设备类', '操作系统', '支撑服务', '应用系统'].map(value => ({ value, label: value }))} />
+            </Form.Item>
+            <Form.Item name="category_main" label="二级分类">
+              <Input placeholder="如：网站系统" />
+            </Form.Item>
+            <Form.Item name="category_sub" label="三级分类">
+              <Input placeholder="如：Nginx" />
+            </Form.Item>
+            <Form.Item name="device_type" label="设备类型">
+              <Input placeholder="如：物联网设备" />
+            </Form.Item>
+            <Form.Item name="device_category" label="设备类别">
+              <Input placeholder="如：摄像头" />
+            </Form.Item>
+            <Form.Item name="os_type" label="操作系统类型">
+              <Input placeholder="如：Linux" />
+            </Form.Item>
+            <Form.Item name="os" label="操作系统">
+              <Input placeholder="如：debian" />
+            </Form.Item>
+          </div>
+
+          <Typography.Text strong>Web 与漏洞</Typography.Text>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px', marginTop: 10 }}>
+            <Form.Item name="title" label="标题">
+              <Input placeholder="网站标题" />
+            </Form.Item>
+            <Form.Item name="server" label="Web 容器">
+              <Input placeholder="如：nginx" />
+            </Form.Item>
+            <Form.Item name="http_status" label="HTTP 状态">
+              <Input placeholder="如：200" />
+            </Form.Item>
+            <Form.Item name="banner" label="Banner">
+              <Input placeholder="服务 Banner" />
+            </Form.Item>
+            <Form.Item name="header" label="Header">
+              <Input placeholder="HTTP 响应头" />
+            </Form.Item>
+            <Form.Item name="body" label="Body">
+              <Input placeholder="网页内容" />
+            </Form.Item>
+            <Form.Item name="cve" label="CVE">
+              <Input placeholder="多个用逗号分隔" />
+            </Form.Item>
+            <Form.Item name="cve_name" label="CVE 名称">
+              <Input placeholder="漏洞名称" />
+            </Form.Item>
+            <Form.Item name="poc" label="PoC">
+              <Input placeholder="多个用逗号分隔" />
+            </Form.Item>
+            <Form.Item name="tag" label="系统标签">
+              <Input placeholder="多个用逗号分隔" />
+            </Form.Item>
+            <Form.Item name="custom_tag" label="自定义标签">
+              <Input placeholder="多个用逗号分隔" />
+            </Form.Item>
+          </div>
+
+          <Form.Item name="ip" label="IP / IP 段">
+            <Input.TextArea rows={2} placeholder="多个用逗号或换行分隔，如：36.7.79.25 或 10.10.0.0/16" />
+          </Form.Item>
+          <Form.Item name="keyword" label="全文关键词">
+            <Input placeholder="从 body/banner/title/detail_text 中检索" />
+          </Form.Item>
+          <Form.Item name="advanced_query" label="高级 RaySpace 语句">
+            <Input.TextArea rows={2} placeholder={'如：port:"80" && (os:"linux" || os:"windows")'} />
+          </Form.Item>
+          {previewQuery && (
+            <Typography.Paragraph style={{ marginBottom: 0 }}>
+              <Typography.Text type="secondary">RaySpace 查询语句：</Typography.Text>
+              <pre style={{ marginTop: 8, padding: 12, background: '#f6f8fa', borderRadius: 8, whiteSpace: 'pre-wrap' }}>{previewQuery}</pre>
+            </Typography.Paragraph>
+          )}
         </Form>
       </Modal>
     </>

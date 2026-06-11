@@ -63,7 +63,7 @@ interface AssetLocation {
   name: string;
   ip: string;
   risk: string;
-  unit_id: string;
+  unit_id: string | null;
   unit_name: string;
   ports: string;
   services: string;

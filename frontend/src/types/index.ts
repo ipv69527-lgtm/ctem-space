@@ -24,7 +24,7 @@ export interface Asset {
   type: string;
   os: string;
   risk: '严重' | '高危' | '中危' | '低危';
-  unit_id: string;
+  unit_id: string | null;
   vuln_ids: string[];
   ports: string;
   services: string;
@@ -38,7 +38,7 @@ export interface Asset {
 export interface AssetChange {
   id: string;
   asset_id: string;
-  unit_id: string;
+  unit_id: string | null;
   ip: string;
   source: string;
   action: 'create' | 'update' | string;
@@ -137,7 +137,7 @@ export interface DashboardData {
 
 export interface SyncTask {
   id: string;
-  unit_id: string;
+  unit_id: string | null;
   status: 'pending' | 'running' | 'success' | 'failed';
   message: string;
   query_condition: string;

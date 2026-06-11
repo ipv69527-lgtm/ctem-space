@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -22,7 +23,11 @@ ASSET_PATH_FALLBACKS = ("api/asset/select/query", "api/v1/assets", "api/assets",
 VULNERABILITY_PATH_FALLBACKS = ("api/v1/vulnerabilities", "api/vulnerabilities", "vulnerabilities")
 TRACKED_ASSET_FIELDS = ("name", "mac", "type", "os", "risk", "ports", "services", "location", "isp")
 CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
+DOMAIN_LIKE_PATTERN = re.compile(r"^\*?\.?[a-z0-9-]+(\.[a-z0-9-]+)+$", re.IGNORECASE)
+IP_LIKE_PATTERN = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 CVE_DETAIL_PATH = "api/v1/plugin/cve_detail/cveid"
+RAYSPACE_CVE_DETAIL_LIMIT = 80
 
 
 def _items(payload: Any) -> list[dict[str, Any]]:
@@ -244,6 +249,36 @@ def _raw_asset_location(raw: dict[str, Any]) -> str:
     return _first_text(raw.get("location"), raw.get("region"), raw.get("province"), raw.get("city"), raw.get("country"))
 
 
+def _raw_unit_name(raw: dict[str, Any]) -> str:
+    return _first_text(
+        raw.get("unit_name"),
+        raw.get("dept"),
+        raw.get("department"),
+        raw.get("org"),
+        raw.get("organization"),
+        raw.get("company"),
+    )
+
+
+def unit_id_from_raw(raw: dict[str, Any], units_by_name: dict[str, str]) -> str | None:
+    name = _raw_unit_name(raw).strip().lower()
+    return units_by_name.get(name) if name else None
+
+
+def _unit_code_from_raw_name(name: str) -> str:
+    digest = hashlib.sha1(name.strip().encode()).hexdigest()[:16]
+    return f"rs-{digest}"
+
+
+def _usable_raw_unit_name(name: str) -> str:
+    text = name.strip()
+    if not text or "*" in text or IP_LIKE_PATTERN.match(text) or DOMAIN_LIKE_PATTERN.match(text):
+        return ""
+    if not CJK_PATTERN.search(text):
+        return ""
+    return text
+
+
 async def _record_asset_change(
     db,
     asset: Asset,
@@ -330,6 +365,139 @@ def rayspace_query_for_unit(unit: Unit) -> str:
     return f'dept:"{unit.name}"'
 
 
+def _quote_query_value(value: Any) -> str:
+    text = _non_empty_text(value)
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _split_condition_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        values = value
+    else:
+        values = re.split(r"[,，\n\r;；\s]+", _text(value))
+    return [item.strip() for item in values if item is not None and item.strip()]
+
+
+def _condition_term(key: str, value: str) -> str:
+    return f'{key}:"{_quote_query_value(value)}"'
+
+
+def _condition_group(key: str, value: Any, *, split: bool = False) -> str:
+    values = _split_condition_values(value) if split else [_non_empty_text(value)]
+    terms = [_condition_term(key, item) for item in values if item]
+    if not terms:
+        return ""
+    return terms[0] if len(terms) == 1 else f"({' || '.join(terms)})"
+
+
+def build_rayspace_query(
+    *,
+    unit: Unit | None = None,
+    advanced_query: str = "",
+    startdate: str = "",
+    enddate: str = "",
+    province: str = "",
+    city: str = "",
+    county: str = "",
+    country: str = "",
+    domain: str = "",
+    ip: str = "",
+    ports: list[str] | None = None,
+    protocol: str = "",
+    service: str = "",
+    status: str = "",
+    asn: str = "",
+    isp: str = "",
+    category: str = "",
+    category_main: str = "",
+    category_sub: str = "",
+    device_type: str = "",
+    device_category: str = "",
+    os_type: str = "",
+    os: str = "",
+    support_type: str = "",
+    support_category: str = "",
+    support_service: str = "",
+    middleware: str = "",
+    product: str = "",
+    title: str = "",
+    banner: str = "",
+    header: str = "",
+    body: str = "",
+    server: str = "",
+    http_status: str = "",
+    cve: str = "",
+    cve_name: str = "",
+    poc: str = "",
+    tag: str = "",
+    custom_tag: str = "",
+    industry: str = "",
+    dept: str = "",
+    ip_company_full: str = "",
+    keyword: str = "",
+) -> str:
+    groups: list[str] = []
+    if unit:
+        unit_query = rayspace_query_for_unit(unit)
+        if unit_query:
+            groups.append(f"({unit_query})" if " || " in unit_query else unit_query)
+    for key, value in (
+        ("startdate", startdate),
+        ("enddate", enddate),
+        ("province", province),
+        ("city", city),
+        ("county", county),
+        ("country", country),
+        ("protocol", protocol),
+        ("service", service),
+        ("status", status),
+        ("asn", asn),
+        ("isp", isp),
+        ("category", category),
+        ("category_main", category_main),
+        ("category_sub", category_sub),
+        ("device_type", device_type),
+        ("device_category", device_category),
+        ("os_type", os_type),
+        ("os", os),
+        ("support_type", support_type),
+        ("support_category", support_category),
+        ("support_service", support_service),
+        ("middleware", middleware),
+        ("product", product),
+        ("title", title),
+        ("banner", banner),
+        ("header", header),
+        ("body", body),
+        ("server", server),
+        ("http_status", http_status),
+        ("cve_name", cve_name),
+        ("industry", industry),
+        ("dept", dept),
+        ("ip_company_full", ip_company_full),
+        ("text", keyword),
+    ):
+        group = _condition_group(key, value)
+        if group:
+            groups.append(group)
+    for key, value in (
+        ("ip", ip),
+        ("port", ports or []),
+        ("domain", domain),
+        ("cve", cve),
+        ("poc", poc),
+        ("tag", tag),
+        ("custom_tag", custom_tag),
+    ):
+        group = _condition_group(key, value, split=True)
+        if group:
+            groups.append(group)
+    raw_query = _non_empty_text(advanced_query)
+    if raw_query:
+        groups.append(f"({raw_query})")
+    return " && ".join(groups)
+
+
 def sync_query_condition(config: SpaceConfig, unit: Unit) -> str:
     if (config.auth_type or "").lower() == "rayspace":
         return rayspace_query_for_unit(unit)
@@ -354,11 +522,13 @@ async def _query_rayspace_assets_once(
     asset_path: str,
     sid: str,
     query: str,
+    page_index: int = 1,
+    page_length: int = 1000,
 ) -> tuple[list[dict[str, Any]] | None, list[str]]:
     payload = {
         "SID": sid,
-        "page_index": 1,
-        "page_length": 1000,
+        "page_index": page_index,
+        "page_length": page_length,
         "search_value": base64.b64encode(query.encode()).decode(),
     }
     url_params = {"SID": sid}
@@ -369,8 +539,12 @@ async def _query_rayspace_assets_once(
         ("GET params", lambda: client.get(urljoin(base_url, asset_path), params=payload)),
     )
     for label, request in requests:
-        resp = await request()
-        data = resp.json()
+        try:
+            resp = await request()
+            data = resp.json()
+        except Exception as exc:
+            errors.append(f"{label} 请求失败: {type(exc).__name__}: {_text(exc)[:200]}")
+            continue
         code = data.get("code", resp.status_code) if isinstance(data, dict) else resp.status_code
         if resp.status_code < 400 and code in (200, "200", 411, "411"):
             return _items(data), []
@@ -421,14 +595,18 @@ async def _enrich_rayspace_cve_details(
 ) -> str:
     cache: dict[str, dict[str, Any] | None] = {}
     current_sid = sid
+    queried = 0
     for asset in assets:
         for vuln in _raw_vuln_refs(asset):
             cve = _valid_cve(vuln.get("cve") or vuln.get("cve_id"))
             if not cve or _non_empty_text(vuln.get("descr")):
                 continue
             if cve not in cache:
+                if queried >= RAYSPACE_CVE_DETAIL_LIMIT:
+                    return current_sid
                 detail, current_sid = await _rayspace_cve_detail(client, config, base_url, current_sid, cve)
                 cache[cve] = detail
+                queried += 1
             detail = cache.get(cve)
             if not detail:
                 continue
@@ -441,32 +619,48 @@ async def _enrich_rayspace_cve_details(
     return current_sid
 
 
-async def fetch_rayspace_assets(config: SpaceConfig, unit: Unit) -> list[dict[str, Any]]:
+async def fetch_rayspace_assets(config: SpaceConfig, unit: Unit | None = None, query: str = "") -> list[dict[str, Any]]:
     base_url = config.base_url.rstrip("/") + "/"
     asset_path = space_candidate_paths(config.asset_path, ASSET_PATH_FALLBACKS)[0]
     if not asset_path.endswith("/"):
         asset_path = f"{asset_path}/"
     async with httpx.AsyncClient(timeout=30, verify=config.verify_tls) as client:
         sid = await rayspace_sid(client, config, base_url)
-        query = rayspace_query_for_unit(unit)
-        assets, first_errors = await _query_rayspace_assets_once(client, base_url, asset_path, sid, query)
-        if assets is not None:
-            await _enrich_rayspace_cve_details(client, config, base_url, sid, assets)
-            return assets
+        query = query or (rayspace_query_for_unit(unit) if unit else "")
+        if not query:
+            raise RuntimeError("RaySpace 查询条件不能为空")
+        page_length = 100
+        all_assets: list[dict[str, Any]] = []
+        current_sid = sid
+        for page_index in range(1, 11):
+            assets, first_errors = await _query_rayspace_assets_once(
+                client, base_url, asset_path, current_sid, query, page_index=page_index, page_length=page_length
+            )
+            if assets is None:
+                current_sid = await rayspace_sid(client, config, base_url)
+                assets, second_errors = await _query_rayspace_assets_once(
+                    client, base_url, asset_path, current_sid, query, page_index=page_index, page_length=page_length
+                )
+                if assets is None:
+                    if all_assets:
+                        break
+                    raise RuntimeError(f"RaySpace 资产查询失败；首次：{'；'.join(first_errors)}；刷新token后：{'；'.join(second_errors)}")
+            if not assets:
+                break
+            all_assets.extend(assets)
+            if len(assets) < page_length:
+                break
+        await _enrich_rayspace_cve_details(client, config, base_url, current_sid, all_assets)
+        return all_assets
 
-        refreshed_sid = await rayspace_sid(client, config, base_url)
-        assets, second_errors = await _query_rayspace_assets_once(client, base_url, asset_path, refreshed_sid, query)
-        if assets is not None:
-            await _enrich_rayspace_cve_details(client, config, base_url, refreshed_sid, assets)
-            return assets
-        raise RuntimeError(f"RaySpace 资产查询失败；首次：{'；'.join(first_errors)}；刷新token后：{'；'.join(second_errors)}")
 
-
-async def _fetch_space(config: SpaceConfig, unit: Unit) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+async def _fetch_space(config: SpaceConfig, unit: Unit | None, query: str = "") -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if (config.auth_type or "").lower() == "rayspace":
-        raw_assets = await fetch_rayspace_assets(config, unit)
+        raw_assets = await fetch_rayspace_assets(config, unit=unit, query=query)
         return raw_assets, []
 
+    if not unit:
+        raise RuntimeError("非 RaySpace 认证方式暂不支持无单位条件拉取")
     headers, auth = space_request_options(config)
     params = unit_sync_params(unit)
     base_url = config.base_url.rstrip("/") + "/"
@@ -489,13 +683,15 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
         if not task:
             raise RuntimeError("同步任务不存在")
 
-        unit_result = await db.execute(select(Unit).where(Unit.id == task.unit_id))
-        unit = unit_result.scalar_one_or_none()
-        if not unit:
-            task.status = "failed"
-            task.message = "单位不存在"
-            await db.commit()
-            return {"assets": 0, "vulns": 0}
+        unit = None
+        if task.unit_id:
+            unit_result = await db.execute(select(Unit).where(Unit.id == task.unit_id))
+            unit = unit_result.scalar_one_or_none()
+            if not unit:
+                task.status = "failed"
+                task.message = "单位不存在"
+                await db.commit()
+                return {"assets": 0, "vulns": 0}
 
         config_result = await db.execute(select(SpaceConfig).where(SpaceConfig.id == "default"))
         config = config_result.scalar_one_or_none()
@@ -507,7 +703,7 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
 
         task.status = "running"
         task.message = "同步执行中"
-        task.query_condition = sync_query_condition(config, unit)
+        task.query_condition = task.query_condition or (sync_query_condition(config, unit) if unit else "")
         task.fetched_assets = 0
         task.synced_assets = 0
         task.synced_vulns = 0
@@ -525,26 +721,50 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
                 await db.commit()
                 return {"assets": 0, "vulns": 0}
 
-            raw_assets, raw_vulns = await _fetch_space(config, unit)
+            raw_assets, raw_vulns = await _fetch_space(config, unit, query=task.query_condition)
             task.fetched_assets = len(raw_assets)
             synced_asset_ids: set[str] = set()
             vuln_count = 0
             asset_ids_by_key: dict[str, str] = {}
+            units = list((await db.execute(select(Unit))).scalars().all())
+            units_by_name = {unit_item.name.strip().lower(): unit_item.id for unit_item in units if unit_item.name}
 
             for raw in raw_assets:
                 ip = _first_text(raw.get("ip"), raw.get("ip_address"), raw.get("host"))
                 if not ip:
                     continue
-                existing = await db.execute(select(Asset).where(Asset.unit_id == unit.id, Asset.ip == ip))
+                raw_unit_id = unit.id if unit else unit_id_from_raw(raw, units_by_name)
+                raw_unit_name = _usable_raw_unit_name(_raw_unit_name(raw))
+                if not raw_unit_id and raw_unit_name:
+                    auto_unit = Unit(
+                        name=raw_unit_name,
+                        code=_unit_code_from_raw_name(raw_unit_name),
+                        desc="RaySpace资产同步自动创建",
+                        status=UnitStatus.ACTIVE,
+                        region_name=_first_text(raw.get("province"), raw.get("city"), raw.get("county")),
+                    )
+                    db.add(auto_unit)
+                    await db.flush()
+                    raw_unit_id = auto_unit.id
+                    units_by_name[raw_unit_name.lower()] = auto_unit.id
+                if raw_unit_id:
+                    existing = await db.execute(select(Asset).where(Asset.unit_id == raw_unit_id, Asset.ip == ip))
+                else:
+                    existing = await db.execute(select(Asset).where(Asset.unit_id.is_(None), Asset.ip == ip))
                 asset = existing.scalar_one_or_none()
+                if not asset and raw_unit_id:
+                    existing_unassigned = await db.execute(select(Asset).where(Asset.unit_id.is_(None), Asset.ip == ip))
+                    asset = existing_unassigned.scalar_one_or_none()
                 is_new = asset is None
                 if not asset:
                     asset = Asset(
                         name=_raw_asset_name(raw, ip),
                         ip=ip,
-                        unit_id=unit.id,
+                        unit_id=raw_unit_id,
                     )
                     db.add(asset)
+                elif raw_unit_id and not asset.unit_id:
+                    asset.unit_id = raw_unit_id
 
                 before = _asset_snapshot(asset)
                 _set_if_present(asset, "name", _raw_asset_name(raw, ""), default=ip)
@@ -586,7 +806,8 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
             task.synced_assets = len(synced_asset_ids)
             task.synced_vulns = vuln_count
             task.error_detail = ""
-            unit.last_sync = datetime.utcnow()
+            if unit:
+                unit.last_sync = datetime.utcnow()
             await db.commit()
             return {"assets": len(synced_asset_ids), "vulns": vuln_count}
         except Exception as exc:

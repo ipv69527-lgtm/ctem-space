@@ -189,7 +189,7 @@ async def get_vuln_assets(vuln_id: str, db: AsyncSession = Depends(get_db), _: U
 
     assets_result = await db.execute(
         select(Asset, Unit)
-        .join(Unit, Unit.id == Asset.unit_id)
+        .outerjoin(Unit, Unit.id == Asset.unit_id)
         .where(Asset.id.in_(vuln.asset_ids))
     )
     assets = [
@@ -199,7 +199,7 @@ async def get_vuln_assets(vuln_id: str, db: AsyncSession = Depends(get_db), _: U
             "ip": asset.ip,
             "risk": asset.risk,
             "unit_id": asset.unit_id,
-            "unit_name": unit.name,
+            "unit_name": unit.name if unit else "",
             "ports": asset.ports,
             "services": asset.services,
         }

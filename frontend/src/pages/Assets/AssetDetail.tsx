@@ -222,7 +222,7 @@ export default function AssetDetail() {
             <Descriptions.Item label="资产名称">{asset.name}</Descriptions.Item>
             <Descriptions.Item label="IP 地址"><code>{asset.ip}</code></Descriptions.Item>
             <Descriptions.Item label="所属单位">
-              {unit ? <a onClick={() => navigate(`/units/${unit.id}`)}>{unit.name}</a> : asset.unit_id || '-'}
+              {unit ? <a onClick={() => navigate(`/units/${unit.id}`)}>{unit.name}</a> : <Tag>未归属</Tag>}
             </Descriptions.Item>
             <Descriptions.Item label="资产类型">{asset.type || deviceType || '-'}</Descriptions.Item>
             <Descriptions.Item label="操作系统">{asset.os || rawValue(asset, ['os_family']) || '-'}</Descriptions.Item>
