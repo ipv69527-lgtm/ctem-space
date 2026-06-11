@@ -4,7 +4,7 @@ import { Layout, Menu, Avatar, Dropdown, theme } from 'antd';
 import type { MenuProps } from 'antd';
 import { DashboardOutlined, BankOutlined, DesktopOutlined, SafetyOutlined,
   FileTextOutlined, EditOutlined, TeamOutlined, SettingOutlined, AuditOutlined,
-  FundViewOutlined, LogoutOutlined } from '@ant-design/icons';
+  FundViewOutlined, LogoutOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { useAuthStore } from '@/stores/authStore';
 import GlobalSearch from '@/components/Layout/GlobalSearch';
 
@@ -12,7 +12,7 @@ const { Sider, Header, Content } = Layout;
 
 const iconColors: Record<string, string> = {
   '/dashboard': '#1677ff', '/screen': '#13c2c2', '/units': '#2f54eb',
-  '/assets': '#13c2c2', '/vulnerabilities': '#f5222d', '/reports': '#fa8c16',
+  '/assets': '#13c2c2', '/dataops': '#1677ff', '/vulnerabilities': '#f5222d', '/reports': '#fa8c16',
   '/templates': '#722ed1', '/users': '#52c41a', '/audit': '#1677ff', '/settings': '#8c8c8c',
 };
 
@@ -25,6 +25,7 @@ const menuItems: MenuProps['items'] = [
   { key: '/screen', icon: coloredIcon(FundViewOutlined, '/screen'), label: '大屏展示' },
   { key: '/units', icon: coloredIcon(BankOutlined, '/units'), label: '单位管理' },
   { key: '/assets', icon: coloredIcon(DesktopOutlined, '/assets'), label: '资产管理' },
+  { key: '/dataops', icon: coloredIcon(DatabaseOutlined, '/dataops'), label: '数据接入' },
   { key: '/vulnerabilities', icon: coloredIcon(SafetyOutlined, '/vulnerabilities'), label: '漏洞管理' },
   { key: '/reports', icon: coloredIcon(FileTextOutlined, '/reports'), label: '报表管理' },
   { key: '/templates', icon: coloredIcon(EditOutlined, '/templates'), label: '报表模板' },

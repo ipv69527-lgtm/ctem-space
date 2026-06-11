@@ -6,6 +6,8 @@ export interface Unit {
   code: string;
   desc: string;
   ip_ranges: string[];
+  aliases: string[];
+  keywords: string[];
   contact: string;
   email: string;
   status: 'active' | 'inactive';
@@ -138,6 +140,7 @@ export interface DashboardData {
 export interface SyncTask {
   id: string;
   unit_id: string | null;
+  unit_name?: string;
   status: 'pending' | 'running' | 'success' | 'failed';
   message: string;
   query_condition: string;
@@ -145,8 +148,40 @@ export interface SyncTask {
   synced_assets: number;
   synced_vulns: number;
   error_detail: string;
+  duration_seconds?: number;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+export interface SyncTaskSummary {
+  total: number;
+  pending: number;
+  running: number;
+  success: number;
+  failed: number;
+  success_rate: number;
+  recent_failed: SyncTask[];
+}
+
+export interface AssetQualityIssue {
+  key: string;
+  label: string;
+  count: number;
+  rate: number;
+  samples: { id: string; ip: string; name: string; unit_id: string | null; issue: string }[];
+}
+
+export interface AssetQualityReport {
+  total_assets: number;
+  assigned_assets: number;
+  unassigned_assets: number;
+  assigned_rate: number;
+  duplicate_group_count: number;
+  duplicate_groups: { unit_id: string | null; ip: string; count: number }[];
+  raw_org_non_empty: number;
+  raw_org_empty: number;
+  raw_org_domain_like: number;
+  issues: AssetQualityIssue[];
 }
 
 export interface SyncScheduleUnit {

@@ -31,6 +31,11 @@ class AssetUpdate(BaseModel):
     location: str = ""
     isp: str = ""
 
+
+class AssetBatchUnitUpdate(BaseModel):
+    asset_ids: list[str]
+    unit_id: Optional[str] = None
+
 class AssetRead(BaseModel):
     id: str
     name: str

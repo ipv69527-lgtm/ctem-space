@@ -158,12 +158,19 @@ def core_data_check() -> None:
     templates = request("GET", "/templates/", token=token)
     reports = request("GET", "/reports/", token=token)
     quality = request("GET", "/assets/quality/summary", token=token)
+    quality_report = request("GET", "/assets/quality/report", token=token)
+    sync_summary = request("GET", "/sync/task-summary", token=token)
+    sync_tasks = request("GET", "/sync/tasks", token=token)
     assert isinstance(units, list)
     assert isinstance(assets, list)
     assert isinstance(vulns, list)
     assert isinstance(templates, list)
     assert isinstance(reports, list)
     assert "total_assets" in quality
+    assert "assigned_assets" in quality_report
+    assert "issues" in quality_report
+    assert "success_rate" in sync_summary
+    assert isinstance(sync_tasks, list)
     assert len(templates) >= 4
 
 
@@ -220,6 +227,13 @@ def asset_edit_check() -> None:
     patched["location"] = marker
     updated = request("PUT", f"/assets/{asset['id']}", patched, token=token)
     assert updated["location"] == marker
+    batch = request(
+        "POST",
+        "/assets/batch/unit",
+        {"asset_ids": [asset["id"]], "unit_id": original["unit_id"]},
+        token=token,
+    )
+    assert batch["asset_count"] == 1
     changes = request("GET", f"/assets/{asset['id']}/changes", token=token)
     assert any(item["action"] == "manual_update" for item in changes)
 

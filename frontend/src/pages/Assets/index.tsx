@@ -1,8 +1,8 @@
 import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Popover, Checkbox, Tooltip, Modal, Form, message, DatePicker } from 'antd';
-import { CloudDownloadOutlined, DesktopOutlined, EditOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, CloudDownloadOutlined, DesktopOutlined, EditOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, type Key } from 'react';
 import apiClient from '@/api/client';
 import type { Asset, Unit } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
@@ -129,9 +129,12 @@ export default function Assets() {
   const [hasVulns, setHasVulns] = useState('');
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumns);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Key[]>([]);
+  const [batchUnitOpen, setBatchUnitOpen] = useState(false);
   const [queryModalOpen, setQueryModalOpen] = useState(false);
   const [previewQuery, setPreviewQuery] = useState('');
   const [form] = Form.useForm();
+  const [batchUnitForm] = Form.useForm();
   const [queryForm] = Form.useForm();
   const canEdit = currentUser?.role === 'super_admin' || currentUser?.role === 'operator';
 
@@ -178,6 +181,23 @@ export default function Assets() {
       queryClient.invalidateQueries({ queryKey: ['asset-changes', res.data.id] });
     },
     onError: (err: any) => message.error(err.response?.data?.detail || '保存失败'),
+  });
+
+  const batchUnitMutation = useMutation({
+    mutationFn: (values: any) => apiClient.post('/assets/batch/unit', {
+      asset_ids: selectedAssetIds.map(String),
+      unit_id: values.unit_id || null,
+    }),
+    onSuccess: (res: any) => {
+      message.success(`批量归属完成，变更 ${res.data?.changed || 0} 个资产`);
+      setBatchUnitOpen(false);
+      setSelectedAssetIds([]);
+      batchUnitForm.resetFields();
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset-quality-report'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+    },
+    onError: (err: any) => message.error(err.response?.data?.detail || '批量归属失败'),
   });
 
   const previewMutation = useMutation({
@@ -320,6 +340,15 @@ export default function Assets() {
           options={[{ value: 'yes', label: '有关联漏洞' }, { value: 'no', label: '无关联漏洞' }]} />
         <Button icon={<ReloadOutlined />} onClick={() => refetch()}>刷新</Button>
         {canEdit && <Button type="primary" icon={<CloudDownloadOutlined />} onClick={() => setQueryModalOpen(true)}>条件拉取</Button>}
+        {canEdit && (
+          <Button
+            icon={<ApartmentOutlined />}
+            disabled={!selectedAssetIds.length}
+            onClick={() => setBatchUnitOpen(true)}
+          >
+            批量归属{selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ''}
+          </Button>
+        )}
         <Button disabled={!hasFilters} onClick={resetFilters}>重置</Button>
         <Popover content={columnConfig} trigger="click" placement="bottomRight">
           <Tooltip title="列配置">
@@ -329,9 +358,33 @@ export default function Assets() {
       </Space>
       {isLoading ? <Spin size="large" style={{ display: 'block', margin: '10vh auto' }} /> : (
         <Table dataSource={assets || []} columns={columns} rowKey="id" style={{ background: '#fff', borderRadius: 14 }}
+          rowSelection={canEdit ? { selectedRowKeys: selectedAssetIds, onChange: setSelectedAssetIds } : undefined}
           scroll={{ x: 1180 }}
           locale={{ emptyText: hasFilters ? '未找到匹配的资产' : '暂无资产数据，请先同步 Space 数据' }} />
       )}
+
+      <Modal
+        title="批量归属资产"
+        open={batchUnitOpen}
+        onCancel={() => { setBatchUnitOpen(false); batchUnitForm.resetFields(); }}
+        onOk={() => batchUnitForm.submit()}
+        confirmLoading={batchUnitMutation.isPending}
+      >
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          已选择 {selectedAssetIds.length} 个资产。选择单位后会覆盖当前归属；不选择单位则清空归属。
+        </Typography.Paragraph>
+        <Form form={batchUnitForm} layout="vertical" onFinish={(values) => batchUnitMutation.mutate(values)}>
+          <Form.Item name="unit_id" label="目标单位">
+            <Select
+              placeholder="清空归属"
+              showSearch
+              allowClear
+              optionFilterProp="label"
+              options={(units || []).map(unit => ({ value: unit.id, label: unit.name }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title="编辑资产"

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from app.config import settings
 from app.database import get_db
@@ -230,6 +230,31 @@ async def _active_task_for_unit(db: AsyncSession, unit_id: str) -> SyncTask | No
     return result.scalar_one_or_none()
 
 
+def _task_duration_seconds(task: SyncTask) -> int:
+    if not task.created_at or not task.updated_at:
+        return 0
+    return max(0, int((task.updated_at - task.created_at).total_seconds()))
+
+
+def _task_payload(task: SyncTask, unit_names: dict[str, str] | None = None) -> dict:
+    unit_names = unit_names or {}
+    return {
+        "id": task.id,
+        "unit_id": task.unit_id,
+        "unit_name": unit_names.get(task.unit_id or "", "") if task.unit_id else "未指定单位",
+        "status": task.status,
+        "message": task.message,
+        "query_condition": task.query_condition,
+        "fetched_assets": task.fetched_assets,
+        "synced_assets": task.synced_assets,
+        "synced_vulns": task.synced_vulns,
+        "error_detail": task.error_detail,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "duration_seconds": _task_duration_seconds(task),
+    }
+
+
 @router.get("/schedule")
 async def get_sync_schedule(
     db: AsyncSession = Depends(get_db),
@@ -263,6 +288,30 @@ async def get_sync_schedule(
         "sync_interval_minutes": config.sync_interval_minutes,
         "now": now,
         "units": items,
+    }
+
+
+@router.get("/task-summary")
+async def sync_task_summary(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_reader),
+):
+    total = (await db.execute(select(func.count(SyncTask.id)))).scalar() or 0
+    status_rows = await db.execute(select(SyncTask.status, func.count(SyncTask.id)).group_by(SyncTask.status))
+    status_counts = {status: count for status, count in status_rows.all()}
+    failed_result = await db.execute(
+        select(SyncTask).where(SyncTask.status == "failed").order_by(SyncTask.updated_at.desc()).limit(5)
+    )
+    success_count = status_counts.get("success", 0)
+    finished_count = success_count + status_counts.get("failed", 0)
+    return {
+        "total": total,
+        "pending": status_counts.get("pending", 0),
+        "running": status_counts.get("running", 0),
+        "success": success_count,
+        "failed": status_counts.get("failed", 0),
+        "success_rate": round(success_count / finished_count * 100, 2) if finished_count else 0,
+        "recent_failed": [_task_payload(task) for task in failed_result.scalars().all()],
     }
 
 
@@ -529,6 +578,43 @@ async def retry_sync(
     }
 
 
+@router.get("/tasks")
+async def list_all_tasks(
+    unit_id: str = Query(""),
+    status: str = Query(""),
+    q: str = Query(""),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_reader),
+):
+    stmt = select(SyncTask)
+    if unit_id == "__unassigned":
+        stmt = stmt.where(SyncTask.unit_id.is_(None))
+    elif unit_id:
+        stmt = stmt.where(SyncTask.unit_id == unit_id)
+    if status:
+        stmt = stmt.where(SyncTask.status == status)
+    if q:
+        pattern = f"%{q}%"
+        stmt = stmt.where(
+            or_(
+                SyncTask.id.ilike(pattern),
+                SyncTask.message.ilike(pattern),
+                SyncTask.query_condition.ilike(pattern),
+                SyncTask.error_detail.ilike(pattern),
+            )
+        )
+    stmt = stmt.order_by(SyncTask.created_at.desc()).limit(limit)
+    result = await db.execute(stmt)
+    tasks = list(result.scalars().all())
+    unit_ids = sorted({task.unit_id for task in tasks if task.unit_id})
+    unit_names: dict[str, str] = {}
+    if unit_ids:
+        unit_result = await db.execute(select(Unit.id, Unit.name).where(Unit.id.in_(unit_ids)))
+        unit_names = {unit_id: name for unit_id, name in unit_result.all()}
+    return [_task_payload(task, unit_names) for task in tasks]
+
+
 @router.get("/tasks/{unit_id}")
 async def list_tasks(
     unit_id: str,
@@ -550,19 +636,4 @@ async def list_tasks(
         )
     stmt = stmt.order_by(SyncTask.created_at.desc()).limit(limit)
     result = await db.execute(stmt)
-    return [
-        {
-            "id": task.id,
-            "unit_id": task.unit_id,
-            "status": task.status,
-            "message": task.message,
-            "query_condition": task.query_condition,
-            "fetched_assets": task.fetched_assets,
-            "synced_assets": task.synced_assets,
-            "synced_vulns": task.synced_vulns,
-            "error_detail": task.error_detail,
-            "created_at": task.created_at,
-            "updated_at": task.updated_at,
-        }
-        for task in result.scalars().all()
-    ]
+    return [_task_payload(task) for task in result.scalars().all()]

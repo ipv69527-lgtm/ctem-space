@@ -260,9 +260,41 @@ def _raw_unit_name(raw: dict[str, Any]) -> str:
     )
 
 
-def unit_id_from_raw(raw: dict[str, Any], units_by_name: dict[str, str]) -> str | None:
-    name = _raw_unit_name(raw).strip().lower()
-    return units_by_name.get(name) if name else None
+def _unit_rule_values(unit: Unit) -> tuple[list[str], list[str]]:
+    exact = [unit.name, *(unit.aliases or [])]
+    keywords = [*(unit.keywords or [])]
+    return (
+        [item.strip().lower() for item in exact if item and item.strip()],
+        [item.strip().lower() for item in keywords if item and item.strip()],
+    )
+
+
+def unit_id_from_raw(raw: dict[str, Any], units: list[Unit]) -> str | None:
+    raw_unit_name = _raw_unit_name(raw).strip().lower()
+    raw_text = " ".join(
+        _non_empty_text(raw.get(key))
+        for key in (
+            "unit_name",
+            "dept",
+            "department",
+            "org",
+            "organization",
+            "company",
+            "ip_company_full",
+            "source",
+            "domain",
+            "title",
+        )
+    ).strip().lower()
+    for unit in units:
+        exact_values, _ = _unit_rule_values(unit)
+        if raw_unit_name and raw_unit_name in exact_values:
+            return unit.id
+    for unit in units:
+        _, keywords = _unit_rule_values(unit)
+        if raw_text and any(keyword in raw_text for keyword in keywords):
+            return unit.id
+    return None
 
 
 def _unit_code_from_raw_name(name: str) -> str:
@@ -727,13 +759,12 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
             vuln_count = 0
             asset_ids_by_key: dict[str, str] = {}
             units = list((await db.execute(select(Unit))).scalars().all())
-            units_by_name = {unit_item.name.strip().lower(): unit_item.id for unit_item in units if unit_item.name}
 
             for raw in raw_assets:
                 ip = _first_text(raw.get("ip"), raw.get("ip_address"), raw.get("host"))
                 if not ip:
                     continue
-                raw_unit_id = unit.id if unit else unit_id_from_raw(raw, units_by_name)
+                raw_unit_id = unit.id if unit else unit_id_from_raw(raw, units)
                 raw_unit_name = _usable_raw_unit_name(_raw_unit_name(raw))
                 if not raw_unit_id and raw_unit_name:
                     auto_unit = Unit(
@@ -746,7 +777,7 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
                     db.add(auto_unit)
                     await db.flush()
                     raw_unit_id = auto_unit.id
-                    units_by_name[raw_unit_name.lower()] = auto_unit.id
+                    units.append(auto_unit)
                 if raw_unit_id:
                     existing = await db.execute(select(Asset).where(Asset.unit_id == raw_unit_id, Asset.ip == ip))
                 else:

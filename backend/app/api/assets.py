@@ -5,7 +5,7 @@ from app.database import get_db
 from app.models.asset import Asset
 from app.models.asset_change import AssetChange
 from app.models.unit import Unit
-from app.schemas.asset import AssetChangeRead, AssetCreate, AssetRead, AssetUpdate
+from app.schemas.asset import AssetBatchUnitUpdate, AssetChangeRead, AssetCreate, AssetRead, AssetUpdate
 from app.services.audit import write_audit_log
 from app.services.auth import require_operator, require_reader
 from app.models.user import User
@@ -14,6 +14,7 @@ router = APIRouter()
 
 ASSET_RISKS = {"严重", "高危", "中危", "低危"}
 ASSET_EDIT_FIELDS = ("name", "ip", "mac", "type", "os", "risk", "unit_id", "ports", "services", "location", "isp")
+MANUFACTURER_KEYS = ("manufacturer", "manufacturer_short", "brand", "model")
 
 
 async def _ensure_asset_unit(db: AsyncSession, unit_id: str | None) -> None:
@@ -33,6 +34,28 @@ def _asset_edit_changes(asset: Asset, body: AssetUpdate) -> dict[str, dict[str, 
         if before != after:
             changes[field] = {"before": before, "after": after}
     return changes
+
+
+def _raw_items(asset: Asset) -> list[dict]:
+    return [item for item in (asset.raw_data or []) if isinstance(item, dict)]
+
+
+def _raw_value(asset: Asset, keys: tuple[str, ...]) -> str:
+    for item in _raw_items(asset):
+        for key in keys:
+            value = item.get(key)
+            if value not in (None, ""):
+                return str(value)
+            app_info = item.get("application_info")
+            if isinstance(app_info, list):
+                for app in app_info:
+                    if isinstance(app, dict) and app.get(key) not in (None, ""):
+                        return str(app[key])
+    return ""
+
+
+def _quality_sample(asset: Asset, issue: str) -> dict[str, str | None]:
+    return {"id": asset.id, "ip": asset.ip, "name": asset.name, "unit_id": asset.unit_id, "issue": issue}
 
 
 @router.get("/", response_model=list[AssetRead])
@@ -116,6 +139,82 @@ async def asset_quality_summary(
     }
 
 
+@router.get("/quality/report")
+async def asset_quality_report(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_reader),
+):
+    assets = list((await db.execute(select(Asset).order_by(Asset.updated_at.desc()))).scalars().all())
+    total = len(assets)
+    assigned = sum(1 for asset in assets if asset.unit_id)
+    missing_ports = []
+    missing_location = []
+    missing_coordinates = []
+    missing_manufacturer = []
+    missing_raw = []
+    raw_org_empty = 0
+    raw_org_domain_like = 0
+    raw_org_non_empty = 0
+    for asset in assets:
+        raw_items = _raw_items(asset)
+        if not asset.ports:
+            missing_ports.append(asset)
+        if not asset.location:
+            missing_location.append(asset)
+        if not (_raw_value(asset, ("longitude", "lng")) and _raw_value(asset, ("latitude", "lat"))):
+            missing_coordinates.append(asset)
+        if not _raw_value(asset, MANUFACTURER_KEYS):
+            missing_manufacturer.append(asset)
+        if not raw_items:
+            missing_raw.append(asset)
+        org_values = [str(item.get("org") or "").strip() for item in raw_items]
+        if any(org_values):
+            raw_org_non_empty += 1
+        else:
+            raw_org_empty += 1
+        if any("*" in value or "." in value for value in org_values if value):
+            raw_org_domain_like += 1
+
+    duplicate_rows = await db.execute(
+        select(Asset.unit_id, Asset.ip, func.count(Asset.id).label("count"))
+        .group_by(Asset.unit_id, Asset.ip)
+        .having(func.count(Asset.id) > 1)
+    )
+    duplicate_groups = [
+        {"unit_id": unit_id, "ip": ip, "count": count}
+        for unit_id, ip, count in duplicate_rows.all()
+    ]
+    issue_specs = [
+        ("missing_unit", [asset for asset in assets if not asset.unit_id], "未归属"),
+        ("missing_ports", missing_ports, "缺端口"),
+        ("missing_location", missing_location, "缺位置"),
+        ("missing_coordinates", missing_coordinates, "缺经纬度"),
+        ("missing_manufacturer", missing_manufacturer, "缺厂商/品牌/型号"),
+        ("missing_raw", missing_raw, "缺原始数据"),
+    ]
+    return {
+        "total_assets": total,
+        "assigned_assets": assigned,
+        "unassigned_assets": total - assigned,
+        "assigned_rate": round(assigned / total * 100, 2) if total else 0,
+        "duplicate_group_count": len(duplicate_groups),
+        "duplicate_groups": duplicate_groups[:50],
+        "raw_org_non_empty": raw_org_non_empty,
+        "raw_org_empty": raw_org_empty,
+        "raw_org_domain_like": raw_org_domain_like,
+        "issues": [
+            {
+                "key": key,
+                "label": label,
+                "count": len(items),
+                "rate": round(len(items) / total * 100, 2) if total else 0,
+                "samples": [_quality_sample(asset, label) for asset in items[:10]],
+            }
+            for key, items, label in issue_specs
+        ],
+    }
+
+
 @router.get("/{asset_id}", response_model=AssetRead)
 async def get_asset(asset_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(require_reader)):
     result = await db.execute(select(Asset).where(Asset.id == asset_id))
@@ -144,6 +243,55 @@ async def list_asset_changes(
         .limit(limit)
     )
     return [AssetChangeRead.model_validate(change) for change in changes.scalars().all()]
+
+
+@router.post("/batch/unit")
+async def batch_update_asset_unit(
+    body: AssetBatchUnitUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_operator),
+):
+    asset_ids = list(dict.fromkeys([item.strip() for item in body.asset_ids if item and item.strip()]))
+    if not asset_ids:
+        raise HTTPException(status_code=400, detail="请选择需要归属的资产")
+    await _ensure_asset_unit(db, body.unit_id)
+    result = await db.execute(select(Asset).where(Asset.id.in_(asset_ids)))
+    assets = list(result.scalars().all())
+    found_ids = {asset.id for asset in assets}
+    missing = [asset_id for asset_id in asset_ids if asset_id not in found_ids]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"资产不存在：{', '.join(missing[:5])}")
+    changed = 0
+    for asset in assets:
+        before_unit = asset.unit_id or ""
+        after_unit = body.unit_id or ""
+        if before_unit == after_unit:
+            continue
+        asset.unit_id = body.unit_id
+        db.add(
+            AssetChange(
+                asset_id=asset.id,
+                unit_id=asset.unit_id,
+                ip=asset.ip,
+                source="manual",
+                action="batch_unit_update",
+                changes={"unit_id": {"before": before_unit, "after": after_unit}},
+            )
+        )
+        changed += 1
+    await write_audit_log(
+        db,
+        action="asset.batch_unit_update",
+        target_type="asset",
+        target_id=",".join(asset_ids[:20]),
+        target_name=f"{len(asset_ids)} 个资产",
+        detail={"asset_count": len(asset_ids), "changed": changed, "unit_id": body.unit_id},
+        user=current_user,
+        request=request,
+    )
+    await db.commit()
+    return {"ok": True, "asset_count": len(asset_ids), "changed": changed, "unit_id": body.unit_id}
 
 
 @router.post("/", response_model=AssetRead, status_code=201)

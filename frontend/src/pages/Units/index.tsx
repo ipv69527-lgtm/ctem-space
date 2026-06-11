@@ -65,6 +65,8 @@ export default function Units() {
       email: unit.email,
       status: unit.status,
       ip_ranges: (unit.ip_ranges || []).join('\n'),
+      aliases: (unit.aliases || []).join('\n'),
+      keywords: (unit.keywords || []).join('\n'),
       region: unit.region,
       region_name: unit.region_name,
     });
@@ -81,6 +83,14 @@ export default function Units() {
     ...values,
     ip_ranges: String(values.ip_ranges || '')
       .split(/[\n,，\s]+/)
+      .map(item => item.trim())
+      .filter(Boolean),
+    aliases: String(values.aliases || '')
+      .split(/[\n,，]+/)
+      .map(item => item.trim())
+      .filter(Boolean),
+    keywords: String(values.keywords || '')
+      .split(/[\n,，]+/)
       .map(item => item.trim())
       .filter(Boolean),
   });
@@ -136,6 +146,12 @@ export default function Units() {
           <Form.Item name="email" label="联系邮箱"><Input placeholder="email@example.com" /></Form.Item>
           <Form.Item name="status" label="状态"><Select options={[{ value: 'active', label: '活跃' }, { value: 'inactive', label: '停用' }]} /></Form.Item>
           <Form.Item name="ip_ranges" label="IP 范围（每行一个）"><Input.TextArea rows={3} placeholder="如：10.10.0.0/16&#10;36.7.79.25" /></Form.Item>
+          <Form.Item name="aliases" label="单位别名（每行一个）">
+            <Input.TextArea rows={3} placeholder="用于自动归属精确匹配，如简称、历史名称" />
+          </Form.Item>
+          <Form.Item name="keywords" label="归属关键词（每行一个）">
+            <Input.TextArea rows={3} placeholder="用于 RaySpace 单位、标题、域名等字段包含匹配" />
+          </Form.Item>
           <Form.Item name="region" label="区域编码"><Input placeholder="如：340100" /></Form.Item>
           <Form.Item name="region_name" label="行政区域"><Input placeholder="如：安徽省" /></Form.Item>
         </Form>

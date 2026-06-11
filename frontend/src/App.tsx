@@ -13,6 +13,7 @@ const Units = lazy(() => import('@/pages/Units'));
 const UnitDetail = lazy(() => import('@/pages/Units/UnitDetail'));
 const Assets = lazy(() => import('@/pages/Assets'));
 const AssetDetail = lazy(() => import('@/pages/Assets/AssetDetail'));
+const DataOps = lazy(() => import('@/pages/DataOps'));
 const Vulnerabilities = lazy(() => import('@/pages/Vulnerabilities'));
 const Reports = lazy(() => import('@/pages/Reports'));
 const Templates = lazy(() => import('@/pages/Templates'));
@@ -73,6 +74,7 @@ export default function App() {
           <Route path="units/:unitId" element={<UnitDetail />} />
           <Route path="assets" element={<Assets />} />
           <Route path="assets/:assetId" element={<AssetDetail />} />
+          <Route path="dataops" element={<DataOps />} />
           <Route path="vulnerabilities" element={<Vulnerabilities />} />
           <Route path="reports" element={<Reports />} />
           <Route path="templates" element={<RoleRoute allowed={['super_admin', 'operator']}><Templates /></RoleRoute>} />

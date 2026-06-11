@@ -13,11 +13,23 @@ router = APIRouter()
 
 def _unit_values(body: UnitCreate) -> dict:
     values = body.model_dump()
+    values["ip_ranges"] = _clean_list(values.get("ip_ranges"))
+    values["aliases"] = _clean_list(values.get("aliases"))
+    values["keywords"] = _clean_list(values.get("keywords"))
     try:
         values["status"] = UnitStatus(values.get("status") or "active")
     except ValueError:
         raise HTTPException(status_code=400, detail="不支持的单位状态")
     return values
+
+
+def _clean_list(values) -> list[str]:
+    items: list[str] = []
+    for item in values or []:
+        text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items
 
 
 async def _ensure_unique_code(db: AsyncSession, code: str, exclude_id: str = "") -> None:
@@ -94,7 +106,14 @@ async def update_unit(
         raise HTTPException(status_code=404, detail="Unit not found")
     values = _unit_values(body)
     await _ensure_unique_code(db, values["code"], exclude_id=unit_id)
-    before = {"name": unit.name, "code": unit.code, "status": unit.status.value, "ip_ranges": unit.ip_ranges}
+    before = {
+        "name": unit.name,
+        "code": unit.code,
+        "status": unit.status.value,
+        "ip_ranges": unit.ip_ranges,
+        "aliases": unit.aliases,
+        "keywords": unit.keywords,
+    }
     for k, v in values.items():
         setattr(unit, k, v)
     await write_audit_log(
@@ -105,7 +124,14 @@ async def update_unit(
         target_name=unit.name,
         detail={
             "before": before,
-            "after": {"name": unit.name, "code": unit.code, "status": unit.status.value, "ip_ranges": unit.ip_ranges},
+            "after": {
+                "name": unit.name,
+                "code": unit.code,
+                "status": unit.status.value,
+                "ip_ranges": unit.ip_ranges,
+                "aliases": unit.aliases,
+                "keywords": unit.keywords,
+            },
         },
         user=current_user,
         request=request,

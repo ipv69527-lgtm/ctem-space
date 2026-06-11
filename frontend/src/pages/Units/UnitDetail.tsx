@@ -134,6 +134,8 @@ export default function UnitDetail() {
           <Descriptions.Item label="描述">{unit.desc || '-'}</Descriptions.Item>
           <Descriptions.Item label="联系人">{unit.contact || '-'} / {unit.email || '-'}</Descriptions.Item>
           <Descriptions.Item label="IP 范围">{(unit.ip_ranges || []).map((ip: string) => <Tag key={ip} color="blue">{ip}</Tag>)}</Descriptions.Item>
+          <Descriptions.Item label="单位别名">{(unit.aliases || []).length ? unit.aliases.map(alias => <Tag key={alias}>{alias}</Tag>) : '-'}</Descriptions.Item>
+          <Descriptions.Item label="归属关键词">{(unit.keywords || []).length ? unit.keywords.map(keyword => <Tag key={keyword} color="cyan">{keyword}</Tag>) : '-'}</Descriptions.Item>
           <Descriptions.Item label="最近同步">{unit.last_sync ? new Date(unit.last_sync).toLocaleString('zh-CN') : <span style={{ color: '#faad14' }}>未同步</span>}</Descriptions.Item>
           <Descriptions.Item label="自动同步">
             {!syncSchedule?.sync_enabled ? '手动同步' : (

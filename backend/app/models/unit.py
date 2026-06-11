@@ -20,6 +20,8 @@ class Unit(Base):
     code: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     desc: Mapped[str] = mapped_column(Text, default="")
     ip_ranges: Mapped[list] = mapped_column(ARRAY(String), default=[])
+    aliases: Mapped[list] = mapped_column(ARRAY(String), default=[])
+    keywords: Mapped[list] = mapped_column(ARRAY(String), default=[])
     contact: Mapped[str] = mapped_column(String(128), default="")
     email: Mapped[str] = mapped_column(String(256), default="")
     status: Mapped[UnitStatus] = mapped_column(SAEnum(UnitStatus), default=UnitStatus.ACTIVE, nullable=False)

@@ -9,6 +9,8 @@ class UnitCreate(BaseModel):
     code: str
     desc: str = ""
     ip_ranges: list[str] = []
+    aliases: list[str] = []
+    keywords: list[str] = []
     contact: str = ""
     email: str = ""
     status: str = "active"
@@ -21,6 +23,8 @@ class UnitRead(BaseModel):
     code: str
     desc: str
     ip_ranges: list[str]
+    aliases: list[str]
+    keywords: list[str]
     contact: str
     email: str
     status: str
