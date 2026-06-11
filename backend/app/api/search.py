@@ -61,6 +61,7 @@ async def global_search(
             or_(
                 Vulnerability.title.ilike(pattern),
                 Vulnerability.cve.ilike(pattern),
+                Vulnerability.poc.ilike(pattern),
                 Vulnerability.desc.ilike(pattern),
                 Vulnerability.solution.ilike(pattern),
                 Vulnerability.status_note.ilike(pattern),
@@ -89,6 +90,7 @@ async def global_search(
             "id": vuln.id,
             "title": vuln.title,
             "cve": vuln.cve,
+            "poc": vuln.poc,
             "severity": vuln.severity,
             "type": "vuln",
         }

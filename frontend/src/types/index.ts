@@ -52,6 +52,7 @@ export interface Vulnerability {
   id: string;
   title: string;
   cve: string;
+  poc: string;
   cvss: number;
   severity: '严重' | '高危' | '中危' | '低危';
   asset_ids: string[];

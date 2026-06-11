@@ -95,6 +95,42 @@ def _cvss(value: Any) -> float:
         return 0.0
 
 
+def _merge_csv(*values: Any) -> str:
+    items: list[str] = []
+    for value in values:
+        for item in re.split(r"[,，\n\r;；]+", _text(value)):
+            text = item.strip()
+            if text and text not in items:
+                items.append(text)
+    return ",".join(items)
+
+
+def _poc_text(raw: dict[str, Any], *, default_from_title: bool = False) -> str:
+    text = _first_text(
+        raw.get("poc"),
+        raw.get("pocs"),
+        raw.get("poc_name"),
+        raw.get("poc_title"),
+        raw.get("poc_id"),
+        raw.get("proof"),
+        raw.get("exploit"),
+    )
+    if text:
+        return text
+    if default_from_title:
+        title = _first_text(raw.get("name"), raw.get("title"), raw.get("vuln_name"))
+        if title and not CVE_PATTERN.match(title.upper()):
+            return title
+        return "PoC"
+    return ""
+
+
+def _with_poc_source(vuln: dict[str, Any]) -> dict[str, Any]:
+    current = dict(vuln)
+    current["poc"] = _merge_csv(current.get("poc"), _poc_text(current, default_from_title=True))
+    return current
+
+
 def _asset_vulns(raw: dict[str, Any]) -> list[dict[str, Any]]:
     for key in ("vulnerabilities", "vulns", "risks", "cves"):
         value = raw.get(key)
@@ -109,12 +145,18 @@ def _asset_vulns(raw: dict[str, Any]) -> list[dict[str, Any]]:
                 if isinstance(scoped, dict):
                     items = scoped.get("detail")
                     if isinstance(items, list):
-                        vulns.extend(v if isinstance(v, dict) else {"title": str(v)} for v in items)
+                        for item in items:
+                            vuln = item if isinstance(item, dict) else {"title": str(item)}
+                            vulns.append(_with_poc_source(vuln) if detail_key == "poc_detail" else vuln)
     for list_key in ("poc_list", "cves", "cve", "pocs"):
         value = raw.get(list_key)
         if isinstance(value, list):
             for item in value:
-                vulns.append(item if isinstance(item, dict) else {"cve": str(item), "title": str(item)})
+                if isinstance(item, dict):
+                    vulns.append(_with_poc_source(item) if list_key in {"poc_list", "pocs"} else item)
+                else:
+                    text = str(item)
+                    vulns.append({"poc": text, "title": text} if list_key in {"poc_list", "pocs"} else {"cve": text, "title": text})
     return _dedupe_vulns(vulns)
 
 
@@ -155,13 +197,18 @@ def _dedupe_vulns(vulns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         current = dict(vuln)
         current["cve"] = cve
         existing = by_cve.get(cve)
+        current["poc"] = _merge_csv(current.get("poc"), _poc_text(current))
         if not existing:
             by_cve[cve] = current
             continue
+        merged_poc = _merge_csv(existing.get("poc"), current.get("poc"), _poc_text(existing), _poc_text(current))
         existing_title = _vuln_display_title(existing, cve)
         current_title = _vuln_display_title(current, cve)
         if existing_title.upper() == cve and current_title.upper() != cve:
+            current["poc"] = merged_poc
             by_cve[cve] = current
+        else:
+            existing["poc"] = merged_poc
     return [*by_cve.values(), *non_cve]
 
 
@@ -909,6 +956,7 @@ async def _upsert_vuln(db, raw: dict[str, Any], asset_id: str) -> Vulnerability:
         db.add(vuln)
     if not cve or title.upper() != cve or vuln.title.upper() == cve:
         vuln.title = title
+    vuln.poc = _merge_csv(vuln.poc, _poc_text(raw))
     vuln.cvss = _cvss(raw.get("cvss_score") or raw.get("cvss") or raw.get("score"))
     vuln.severity = _severity(raw.get("severity") or raw.get("risk") or raw.get("level"))
     desc = _first_text(raw.get("descr"), raw.get("desc"), raw.get("description"))

@@ -39,6 +39,7 @@ async def list_vulns(
     q: str = Query(""),
     severity: str = Query(""),
     status: str = Query(""),
+    poc: str = Query(""),
     asset_id: str = Query(""),
     unit_id: str = Query(""),
     ip: str = Query(""),
@@ -52,6 +53,7 @@ async def list_vulns(
             or_(
                 Vulnerability.title.ilike(pattern),
                 Vulnerability.cve.ilike(pattern),
+                Vulnerability.poc.ilike(pattern),
                 Vulnerability.desc.ilike(pattern),
                 Vulnerability.solution.ilike(pattern),
                 Vulnerability.status_note.ilike(pattern),
@@ -61,6 +63,10 @@ async def list_vulns(
         stmt = stmt.where(Vulnerability.severity == severity)
     if status:
         stmt = stmt.where(Vulnerability.status == status)
+    if poc == "yes":
+        stmt = stmt.where(Vulnerability.poc != "")
+    elif poc == "no":
+        stmt = stmt.where(Vulnerability.poc == "")
     if asset_id:
         stmt = stmt.where(Vulnerability.asset_ids.any(asset_id))
     if unit_id or ip:
@@ -105,7 +111,7 @@ async def create_vuln(
         target_type="vulnerability",
         target_id=vuln.id,
         target_name=vuln.title,
-        detail={"severity": vuln.severity, "status": vuln.status, "asset_count": len(vuln.asset_ids or [])},
+        detail={"severity": vuln.severity, "status": vuln.status, "poc": vuln.poc, "asset_count": len(vuln.asset_ids or [])},
         user=current_user,
         request=request,
     )
@@ -127,7 +133,7 @@ async def update_vuln(
     if not vuln:
         raise HTTPException(status_code=404, detail="漏洞不存在")
     await _validate_vuln_payload(db, body)
-    before = {"title": vuln.title, "severity": vuln.severity, "status": vuln.status}
+    before = {"title": vuln.title, "severity": vuln.severity, "status": vuln.status, "poc": vuln.poc}
     for key, value in body.model_dump().items():
         setattr(vuln, key, value)
     await write_audit_log(
@@ -136,7 +142,7 @@ async def update_vuln(
         target_type="vulnerability",
         target_id=vuln.id,
         target_name=vuln.title,
-        detail={"before": before, "after": {"title": vuln.title, "severity": vuln.severity, "status": vuln.status}},
+        detail={"before": before, "after": {"title": vuln.title, "severity": vuln.severity, "status": vuln.status, "poc": vuln.poc}},
         user=current_user,
         request=request,
     )

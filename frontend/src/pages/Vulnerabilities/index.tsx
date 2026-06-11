@@ -25,6 +25,7 @@ export default function Vulnerabilities() {
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [severity, setSeverity] = useState('');
   const [status, setStatus] = useState('');
+  const [poc, setPoc] = useState('');
   const [unitId, setUnitId] = useState('');
   const [assetId, setAssetId] = useState('');
   const [ip, setIp] = useState('');
@@ -37,12 +38,13 @@ export default function Vulnerabilities() {
   }, [searchParams]);
 
   const { data: vulns, isLoading } = useQuery<Vulnerability[]>({
-    queryKey: ['vulns', q, severity, status, unitId, assetId, ip],
+    queryKey: ['vulns', q, severity, status, poc, unitId, assetId, ip],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (severity) params.set('severity', severity);
       if (status) params.set('status', status);
+      if (poc) params.set('poc', poc);
       if (unitId) params.set('unit_id', unitId);
       if (assetId) params.set('asset_id', assetId);
       if (ip) params.set('ip', ip);
@@ -93,12 +95,13 @@ export default function Vulnerabilities() {
 
   const assetsById = new Map((assets || []).map(asset => [asset.id, asset]));
   const unitNameById = new Map((units || []).map(unit => [unit.id, unit.name]));
-  const hasFilters = Boolean(q || severity || status || unitId || assetId || ip);
+  const hasFilters = Boolean(q || severity || status || poc || unitId || assetId || ip);
 
   const resetFilters = () => {
     setQ('');
     setSeverity('');
     setStatus('');
+    setPoc('');
     setUnitId('');
     setAssetId('');
     setIp('');
@@ -118,6 +121,13 @@ export default function Vulnerabilities() {
   const columns = [
     { title: '漏洞名称', dataIndex: 'title', key: 'title', width: 300, render: (v: string) => <strong>{v}</strong> },
     { title: 'CVE', dataIndex: 'cve', key: 'cve', width: 160, render: (v: string) => <code>{v}</code> },
+    {
+      title: 'PoC',
+      dataIndex: 'poc',
+      key: 'poc',
+      width: 150,
+      render: (v: string) => v ? <Tag color="red">{v}</Tag> : <Tag>未验证</Tag>,
+    },
     {
       title: '漏洞描述',
       dataIndex: 'desc',
@@ -167,12 +177,14 @@ export default function Vulnerabilities() {
           options={['严重','高危','中危','低危'].map(v=>({value:v,label:v}))} />
         <Select placeholder="处置状态" value={status || undefined} onChange={value => setStatus(value || '')} style={{ width: 130 }} allowClear
           options={VULN_STATUSES.map(v=>({value:v,label:v}))} />
+        <Select placeholder="PoC" value={poc || undefined} onChange={value => setPoc(value || '')} style={{ width: 120 }} allowClear
+          options={[{ value: 'yes', label: '有 PoC' }, { value: 'no', label: '无 PoC' }]} />
         <Button icon={<ReloadOutlined />} onClick={() => queryClient.invalidateQueries({ queryKey: ['vulns'] })}>刷新</Button>
         <Button disabled={!hasFilters} onClick={resetFilters}>重置</Button>
       </Space>
       {isLoading ? <Spin size="large" style={{ display: 'block', margin: '10vh auto' }} /> : (
         <Table dataSource={vulns || []} columns={columns} rowKey="id" style={{ background: '#fff', borderRadius: 14 }}
-          scroll={{ x: 1180 }}
+          scroll={{ x: 1280 }}
           locale={{ emptyText: hasFilters ? '未找到匹配的漏洞' : '暂无漏洞数据' }}
           expandable={{
             expandedRowRender: (record) => {
@@ -180,6 +192,7 @@ export default function Vulnerabilities() {
               return (
                 <div style={{ padding: '8px 0' }}>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>描述：{record.desc || '暂无'}</p>
+                  <p style={{ marginBottom: 8, color: '#5f6368' }}>PoC：{record.poc || '未验证'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>修复方案：{record.solution || '暂无'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>处置备注：{record.status_note || '暂无'}</p>
                   <p style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>受影响资产：</p>

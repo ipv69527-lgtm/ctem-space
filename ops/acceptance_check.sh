@@ -164,6 +164,7 @@ def core_data_check() -> None:
     assert isinstance(units, list)
     assert isinstance(assets, list)
     assert isinstance(vulns, list)
+    assert all("poc" in item for item in vulns)
     assert isinstance(templates, list)
     assert isinstance(reports, list)
     assert "total_assets" in quality

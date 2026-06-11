@@ -6,7 +6,7 @@ import apiClient from '@/api/client';
 
 interface SearchItem {
   id: string; name?: string; title?: string; code?: string; ip?: string;
-  cve?: string; severity?: string; risk?: string; type: string; unit_id?: string;
+  cve?: string; poc?: string; severity?: string; risk?: string; type: string; unit_id?: string;
 }
 
 export default function GlobalSearch() {
@@ -108,7 +108,7 @@ export default function GlobalSearch() {
           {results.vulns.map(v => (
             <div key={v.id} onClick={() => goTo(v)} style={{ padding: '8px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', fontSize: 13 }}
               onMouseEnter={e => (e.currentTarget.style.background = '#f1f3f4')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-              <span>{v.title}</span><span style={{ color: '#8c8c8c', fontSize: 11 }}>{v.cve} · {v.severity}</span>
+              <span>{v.title}</span><span style={{ color: '#8c8c8c', fontSize: 11 }}>{v.cve || v.poc || '-'} · {v.severity}</span>
             </div>
           ))}
         </div>
