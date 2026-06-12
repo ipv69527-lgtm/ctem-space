@@ -132,6 +132,29 @@ def _truthy(value: Any) -> bool:
     return text in {"1", "true", "yes", "y", "命中", "成功", "验证成功", "已验证", "verified", "validated", "matched", "hit", "success"}
 
 
+def _poc_detail_evidence(raw: dict[str, Any]) -> str:
+    detail = raw.get("poc_detail")
+    if not isinstance(detail, dict) or not detail:
+        return ""
+    values: list[str] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            for key in ("comment", "evidence", "proof", "verify_result", "exploit_result", "result", "detail", "detail_text"):
+                text = _non_empty_text(value.get(key))
+                if text and text not in values:
+                    values.append(text)
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    collect(nested)
+        elif isinstance(value, list):
+            for item in value:
+                collect(item)
+
+    collect(detail)
+    return "\n".join(values)
+
+
 def _poc_status(raw: dict[str, Any]) -> str:
     for key in ("poc_status", "verify_status", "verified_status", "status"):
         text = _non_empty_text(raw.get(key)).lower()
@@ -142,6 +165,8 @@ def _poc_status(raw: dict[str, Any]) -> str:
     if any(_truthy(raw.get(key)) for key in ("poc_verified", "verified", "validated", "is_verified", "matched", "hit", "success")):
         return "verified"
     if _first_text(raw.get("evidence"), raw.get("proof"), raw.get("verify_result"), raw.get("exploit_result")):
+        return "verified"
+    if _poc_detail_evidence(raw) or (isinstance(raw.get("poc_detail"), dict) and raw.get("poc_detail")):
         return "verified"
     if _poc_text(raw):
         return "available"
@@ -164,6 +189,7 @@ def _poc_evidence(raw: dict[str, Any]) -> str:
         raw.get("verify_result"),
         raw.get("exploit_result"),
         raw.get("detail_text"),
+        _poc_detail_evidence(raw),
     )
 
 
@@ -195,12 +221,30 @@ def _asset_vulns(raw: dict[str, Any]) -> list[dict[str, Any]]:
     for list_key in ("poc_list", "cves", "cve", "pocs"):
         value = raw.get(list_key)
         if isinstance(value, list):
+            parent_verified = list_key in {"poc_list", "pocs"} and _poc_status(raw) == "verified"
+            parent_evidence = _poc_detail_evidence(raw)
             for item in value:
                 if isinstance(item, dict):
-                    vulns.append(_with_poc_source(item) if list_key in {"poc_list", "pocs"} else item)
+                    if list_key in {"poc_list", "pocs"}:
+                        current = dict(item)
+                        current["poc_evidence"] = _merge_csv(current.get("poc_evidence"), parent_evidence)
+                        vulns.append(_with_poc_source(current, verified=parent_verified))
+                    else:
+                        vulns.append(item)
                 else:
                     text = str(item)
-                    vulns.append({"poc": text, "title": text} if list_key in {"poc_list", "pocs"} else {"cve": text, "title": text})
+                    if list_key in {"poc_list", "pocs"}:
+                        vulns.append(_with_poc_source(
+                            {
+                                "poc": text,
+                                "title": text,
+                                "poc_status": "verified" if parent_verified else "available",
+                                "poc_evidence": parent_evidence,
+                            },
+                            verified=parent_verified,
+                        ))
+                    else:
+                        vulns.append({"cve": text, "title": text})
     return _dedupe_vulns(vulns)
 
 
