@@ -28,6 +28,13 @@ function missingVerifiedEvidence(record: Vulnerability) {
   return record.poc_status === 'verified' && !record.poc_evidence;
 }
 
+function vulnerabilityDescription(record: Vulnerability) {
+  if (record.desc) return record.desc;
+  if (record.poc_status === 'verified' && record.poc) return `POC已验证命中：${record.poc}`;
+  if (record.poc_status === 'none' && record.cve) return `CVE版本匹配：${record.cve}`;
+  return '';
+}
+
 export default function Vulnerabilities() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
@@ -152,11 +159,14 @@ export default function Vulnerabilities() {
       dataIndex: 'desc',
       key: 'desc',
       width: 260,
-      render: (v: string) => (
-        <Typography.Text ellipsis={{ tooltip: v || '-' }} style={{ maxWidth: 240 }}>
-          {v || '-'}
-        </Typography.Text>
-      ),
+      render: (_: string, record: Vulnerability) => {
+        const text = vulnerabilityDescription(record);
+        return (
+          <Typography.Text ellipsis={{ tooltip: text || '-' }} style={{ maxWidth: 240 }}>
+            {text || '-'}
+          </Typography.Text>
+        );
+      },
     },
     { title: '等级', dataIndex: 'severity', key: 'severity', width: 80, render: (v: string) => <Tag color={severityColors[v] || 'default'}>{v}</Tag> },
     {
@@ -213,7 +223,7 @@ export default function Vulnerabilities() {
               if (expandedId !== record.id) return null;
               return (
                 <div style={{ padding: '8px 0' }}>
-                  <p style={{ marginBottom: 8, color: '#5f6368' }}>描述：{record.desc || '暂无'}</p>
+                  <p style={{ marginBottom: 8, color: '#5f6368' }}>描述：{vulnerabilityDescription(record) || '暂无'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>PoC 状态：{pocStatusLabels[record.poc_status] || record.poc_status || '无 PoC'}{record.poc ? ` / ${record.poc}` : ''}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>原始验证时间：{record.poc_status === 'verified' ? formatTime(record.poc_verified_at) : '-'}</p>
                   <p style={{ marginBottom: 8, color: missingVerifiedEvidence(record) ? '#d46b08' : '#5f6368' }}>

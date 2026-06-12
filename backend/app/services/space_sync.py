@@ -23,6 +23,7 @@ ASSET_PATH_FALLBACKS = ("api/asset/select/query", "api/v1/assets", "api/assets",
 VULNERABILITY_PATH_FALLBACKS = ("api/v1/vulnerabilities", "api/vulnerabilities", "vulnerabilities")
 TRACKED_ASSET_FIELDS = ("name", "mac", "type", "os", "risk", "ports", "services", "location", "isp")
 CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
+CVE_IN_TEXT_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 DOMAIN_LIKE_PATTERN = re.compile(r"^\*?\.?[a-z0-9-]+(\.[a-z0-9-]+)+$", re.IGNORECASE)
 IP_LIKE_PATTERN = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
@@ -351,11 +352,29 @@ def _vuln_display_title(raw: dict[str, Any], cve: str = "") -> str:
     return _first_text(raw.get("title"), raw.get("name"), raw.get("vuln_name"), cve, raw.get("cve"), raw.get("cve_id"), default="未命名漏洞")
 
 
+def _vuln_description(raw: dict[str, Any]) -> str:
+    return _first_text(
+        raw.get("descr"),
+        raw.get("desc"),
+        raw.get("description"),
+        raw.get("vuln_desc"),
+        raw.get("vuln_description"),
+        raw.get("summary"),
+    )
+
+
 def _dedupe_vulns(vulns: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_cve: dict[str, dict[str, Any]] = {}
     non_cve: list[dict[str, Any]] = []
     for vuln in vulns:
-        cve = _valid_cve(vuln.get("cve") or vuln.get("cve_id"))
+        cve = _extract_cve(
+            vuln.get("cve"),
+            vuln.get("cve_id"),
+            vuln.get("title"),
+            vuln.get("name"),
+            vuln.get("vuln_name"),
+            _poc_text(vuln),
+        )
         if not cve:
             non_cve.append(vuln)
             continue
@@ -559,6 +578,17 @@ async def _record_asset_change(
 def _valid_cve(value: Any) -> str:
     text = _non_empty_text(value).upper()
     return text if CVE_PATTERN.match(text) else ""
+
+
+def _extract_cve(*values: Any) -> str:
+    for value in values:
+        cve = _valid_cve(value)
+        if cve:
+            return cve
+        match = CVE_IN_TEXT_PATTERN.search(_non_empty_text(value))
+        if match:
+            return match.group(0).upper()
+    return ""
 
 
 def space_candidate_paths(primary: str, fallbacks: tuple[str, ...]) -> tuple[str, ...]:
@@ -854,7 +884,14 @@ async def _enrich_rayspace_cve_details(
     queried = 0
     for asset in assets:
         for vuln in _raw_vuln_refs(asset):
-            cve = _valid_cve(vuln.get("cve") or vuln.get("cve_id"))
+            cve = _extract_cve(
+                vuln.get("cve"),
+                vuln.get("cve_id"),
+                vuln.get("title"),
+                vuln.get("name"),
+                vuln.get("vuln_name"),
+                _poc_text(vuln),
+            )
             if not cve or _non_empty_text(vuln.get("descr")):
                 continue
             if cve not in cache:
@@ -1119,7 +1156,14 @@ def create_due_sync_tasks_blocking() -> list[str]:
 
 
 async def _upsert_vuln(db, raw: dict[str, Any], asset_id: str) -> Vulnerability:
-    cve = _valid_cve(raw.get("cve") or raw.get("cve_id"))
+    cve = _extract_cve(
+        raw.get("cve"),
+        raw.get("cve_id"),
+        raw.get("title"),
+        raw.get("name"),
+        raw.get("vuln_name"),
+        _poc_text(raw),
+    )
     title = _vuln_display_title(raw, cve)
     stmt = select(Vulnerability)
     if cve:
@@ -1139,7 +1183,7 @@ async def _upsert_vuln(db, raw: dict[str, Any], asset_id: str) -> Vulnerability:
     vuln.poc_verified_at = _merge_poc_verified_at(vuln.poc_verified_at, raw.get("poc_verified_at"), _poc_verified_at(raw))
     vuln.cvss = _cvss(raw.get("cvss_score") or raw.get("cvss") or raw.get("score"))
     vuln.severity = _severity(raw.get("severity") or raw.get("risk") or raw.get("level"))
-    desc = _first_text(raw.get("descr"), raw.get("desc"), raw.get("description"))
+    desc = _vuln_description(raw)
     if desc:
         vuln.desc = desc
     vuln.solution = _text(raw.get("solution") or raw.get("remediation") or raw.get("fix"))
