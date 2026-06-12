@@ -27,7 +27,7 @@ export default function Vulnerabilities() {
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [severity, setSeverity] = useState('');
   const [status, setStatus] = useState('');
-  const [pocStatus, setPocStatus] = useState('');
+  const [pocStatus, setPocStatus] = useState(searchParams.get('poc_status') || '');
   const [unitId, setUnitId] = useState('');
   const [assetId, setAssetId] = useState('');
   const [ip, setIp] = useState('');
@@ -36,7 +36,9 @@ export default function Vulnerabilities() {
 
   useEffect(() => {
     const nextQ = searchParams.get('q') || '';
+    const nextPocStatus = searchParams.get('poc_status') || '';
     setQ(nextQ);
+    setPocStatus(nextPocStatus);
   }, [searchParams]);
 
   const { data: vulns, isLoading } = useQuery<Vulnerability[]>({
