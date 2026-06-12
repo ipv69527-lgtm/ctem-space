@@ -17,7 +17,7 @@ const statusColors: Record<string, string> = {
   接受风险: 'cyan',
 };
 const severityColors: Record<string, string> = { 严重: 'red', 高危: 'orange', 中危: 'blue', 低危: 'green' };
-const pocStatusLabels: Record<string, string> = { none: '无 PoC', available: 'PoC 存在', verified: '已验证命中' };
+const pocStatusLabels: Record<string, string> = { none: 'CVE版本匹配', available: 'PoC 存在', verified: 'POC已验证命中' };
 const pocStatusColors: Record<string, string> = { none: 'default', available: 'orange', verified: 'red' };
 
 function formatTime(value?: string | null) {
@@ -193,9 +193,8 @@ export default function Vulnerabilities() {
           options={VULN_STATUSES.map(v=>({value:v,label:v}))} />
         <Select placeholder="PoC 状态" value={pocStatus || undefined} onChange={value => setPocStatus(value || '')} style={{ width: 140 }} allowClear
           options={[
-            { value: 'verified', label: '已验证命中' },
-            { value: 'available', label: 'PoC 存在' },
-            { value: 'none', label: '无 PoC' },
+            { value: 'verified', label: 'POC已验证命中' },
+            { value: 'none', label: 'CVE版本匹配' },
           ]} />
         <Button icon={<ReloadOutlined />} onClick={() => queryClient.invalidateQueries({ queryKey: ['vulns'] })}>刷新</Button>
         <Button disabled={!hasFilters} onClick={resetFilters}>重置</Button>
