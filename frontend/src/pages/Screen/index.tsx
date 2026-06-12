@@ -150,6 +150,13 @@ function areaColor(score: number, index: number) {
   return MAP_AREA_COLORS[index % 2 === 0 ? 0 : 1];
 }
 
+function clusterColor(highAssets: number, assetCount: number) {
+  if (highAssets >= 10) return '#ff4d4f';
+  if (highAssets > 0) return '#fa8c16';
+  if (assetCount >= 20) return '#1677ff';
+  return '#13c2c2';
+}
+
 export default function Screen() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -352,13 +359,6 @@ export default function Screen() {
       drillToCountyLevel(name, adcode);
       return;
     }
-    if (currentRegion.level === 'city' && params.seriesType === 'effectScatter') {
-      const asset = data.asset;
-      const feature = findFeatureByCoordinate(currentGeoJSON, Number(asset?.longitude), Number(asset?.latitude));
-      const featureName = feature?.properties?.name;
-      const featureAdcode = Number(feature?.properties?.adcode);
-      if (featureName && Number.isFinite(featureAdcode)) drillToCountyLevel(featureName, featureAdcode);
-    }
   };
 
   const renderMap = (geoJSON: any, region: MapRegion) => {
@@ -380,11 +380,32 @@ export default function Screen() {
         asset_count: assetsInArea.length,
         high_assets: assetsInArea.filter(point => ['严重', '高危'].includes(point.asset.risk)).length,
         vuln_count: assetsInArea.reduce((sum, point) => sum + (point.asset.vuln_count || 0), 0),
+        top_assets: assetsInArea
+          .sort((a, b) => ((riskWeight[b.asset.risk] || 0) + (b.asset.vuln_count || 0)) - ((riskWeight[a.asset.risk] || 0) + (a.asset.vuln_count || 0)))
+          .slice(0, 5)
+          .map(point => point.asset),
         adcode: feature.properties.adcode,
         properties: feature.properties,
         itemStyle: { areaColor: areaColor(score, index) },
       };
     });
+    const clusterData = areaData
+      .filter((item: any) => item.asset_count > 0)
+      .map((item: any) => {
+        const center = item.properties.centroid || item.properties.center;
+        return {
+          ...item,
+          value: [Number(center?.[0]), Number(center?.[1]), item.value, item.asset_count],
+          itemStyle: {
+            color: clusterColor(item.high_assets, item.asset_count),
+            borderColor: '#fff',
+            borderWidth: 2,
+            shadowBlur: 16,
+            shadowColor: 'rgba(15, 23, 42, .22)',
+          },
+        };
+      })
+      .filter((item: any) => Number.isFinite(item.value[0]) && Number.isFinite(item.value[1]));
 
     chart.setOption({
       backgroundColor: '#f7faf9',
@@ -395,15 +416,16 @@ export default function Screen() {
         textStyle: { color: '#1f2937' },
         formatter: (params: any) => {
           if (params.seriesType === 'effectScatter') {
-            const asset = params.data.asset;
+            const item = params.data || {};
+            const topAssets = (item.top_assets || [])
+              .map((asset: AssetLocation) => `${asset.ip} ${asset.risk} 漏洞${asset.vuln_count || 0}`)
+              .join('<br/>');
             return [
-              `<strong>${asset.name || asset.ip}</strong>`,
-              `IP：${asset.ip}`,
-              `单位：${asset.unit_name || '-'}`,
-              `风险：${asset.risk}`,
-              `端口：${asset.ports || '-'}`,
-              `服务：${asset.services || '-'}`,
-              `漏洞：${asset.vuln_count || 0} 个`,
+              `<strong>${item.name}</strong>`,
+              `资产数：${item.asset_count || 0}`,
+              `高风险资产：${item.high_assets || 0}`,
+              `关联漏洞：${item.vuln_count || 0}`,
+              topAssets ? `Top资产：<br/>${topAssets}` : '',
             ].join('<br/>');
           }
           const item = params.data || {};
@@ -460,24 +482,18 @@ export default function Screen() {
           },
         },
         {
-          name: '资产点位',
+          name: '资产聚合',
           type: 'effectScatter',
           coordinateSystem: 'geo',
-          data: points,
-          symbolSize: (value: number[]) => Math.max(9, Math.min(22, Number(value[2]) + 6)),
-          rippleEffect: { brushType: 'stroke', scale: 3.2 },
+          data: clusterData,
+          symbolSize: (value: number[]) => Math.max(20, Math.min(56, Math.sqrt(Number(value[3]) || 1) * 6 + 14)),
+          rippleEffect: { brushType: 'stroke', scale: 2.6 },
           label: {
             show: true,
-            formatter: (params: any) => params.data.asset.ip,
-            position: 'right',
-            color: '#0f172a',
-            fontSize: 11,
-            fontWeight: 600,
-          },
-          itemStyle: {
-            color: '#ff6b35',
-            shadowBlur: 14,
-            shadowColor: 'rgba(255,107,53,.42)',
+            formatter: (params: any) => params.data.asset_count,
+            color: '#fff',
+            fontSize: 12,
+            fontWeight: 700,
           },
           zlevel: 2,
         },
@@ -486,7 +502,7 @@ export default function Screen() {
     chart.off('click');
     chart.on('click', handleMapClick);
     setLoading(false);
-    if (assetLocationsFetched && !points.length) {
+    if (assetLocationsFetched && !clusterData.length) {
       setMapAlertType('info');
       setMapMessage('当前资产暂无可用经纬度，已显示行政区划底图');
     }
