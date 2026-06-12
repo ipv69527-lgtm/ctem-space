@@ -138,12 +138,39 @@ def _poc_detail_evidence(raw: dict[str, Any]) -> str:
         return ""
     values: list[str] = []
 
+    def collect_authentication(value: Any) -> None:
+        if not isinstance(value, list):
+            return
+        accounts: list[str] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            account = _first_text(
+                item.get("name"),
+                item.get("username"),
+                item.get("user"),
+                item.get("account"),
+                item.get("login"),
+                item.get("login_name"),
+            )
+            if account and account not in accounts:
+                accounts.append(account)
+        if not value:
+            return
+        account_text = f"账号：{'、'.join(accounts[:5])}" if accounts else "账号已脱敏"
+        if len(accounts) > 5:
+            account_text += f" 等{len(accounts)}个"
+        text = f"认证命中：{len(value)}组，{account_text}，密码已脱敏"
+        if text not in values:
+            values.append(text)
+
     def collect(value: Any) -> None:
         if isinstance(value, dict):
             for key in ("comment", "evidence", "proof", "verify_result", "exploit_result", "result", "detail", "detail_text"):
                 text = _non_empty_text(value.get(key))
                 if text and text not in values:
                     values.append(text)
+            collect_authentication(value.get("authentication"))
             for nested in value.values():
                 if isinstance(nested, (dict, list)):
                     collect(nested)

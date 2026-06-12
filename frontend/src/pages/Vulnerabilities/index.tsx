@@ -24,6 +24,10 @@ function formatTime(value?: string | null) {
   return value ? new Date(value).toLocaleString('zh-CN') : '-';
 }
 
+function missingVerifiedEvidence(record: Vulnerability) {
+  return record.poc_status === 'verified' && !record.poc_evidence;
+}
+
 export default function Vulnerabilities() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
@@ -137,6 +141,7 @@ export default function Vulnerabilities() {
       render: (value: string, record: Vulnerability) => (
         <Space size={4} wrap>
           <Tag color={pocStatusColors[value] || 'default'}>{pocStatusLabels[value] || value || '无 PoC'}</Tag>
+          {missingVerifiedEvidence(record) && <Tag color="orange">缺证据</Tag>}
           {record.poc && <Typography.Text ellipsis={{ tooltip: record.poc }} style={{ maxWidth: 72 }}>{record.poc}</Typography.Text>}
         </Space>
       ),
@@ -211,7 +216,9 @@ export default function Vulnerabilities() {
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>描述：{record.desc || '暂无'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>PoC 状态：{pocStatusLabels[record.poc_status] || record.poc_status || '无 PoC'}{record.poc ? ` / ${record.poc}` : ''}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>原始验证时间：{record.poc_status === 'verified' ? formatTime(record.poc_verified_at) : '-'}</p>
-                  <p style={{ marginBottom: 8, color: '#5f6368' }}>验证证据：{record.poc_evidence || '暂无'}</p>
+                  <p style={{ marginBottom: 8, color: missingVerifiedEvidence(record) ? '#d46b08' : '#5f6368' }}>
+                    验证证据：{record.poc_evidence || (record.poc_status === 'verified' ? '暂无，需补充验证证据' : '暂无')}
+                  </p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>修复方案：{record.solution || '暂无'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>处置备注：{record.status_note || '暂无'}</p>
                   <p style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>受影响资产：</p>
