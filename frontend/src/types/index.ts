@@ -55,6 +55,7 @@ export interface Vulnerability {
   poc: string;
   poc_status: 'none' | 'available' | 'verified';
   poc_evidence: string;
+  poc_verified_at: string | null;
   cvss: number;
   severity: '严重' | '高危' | '中危' | '低危';
   asset_ids: string[];

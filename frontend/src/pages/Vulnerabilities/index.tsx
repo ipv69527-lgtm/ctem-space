@@ -20,6 +20,10 @@ const severityColors: Record<string, string> = { 严重: 'red', 高危: 'orange'
 const pocStatusLabels: Record<string, string> = { none: '无 PoC', available: 'PoC 存在', verified: '已验证命中' };
 const pocStatusColors: Record<string, string> = { none: 'default', available: 'orange', verified: 'red' };
 
+function formatTime(value?: string | null) {
+  return value ? new Date(value).toLocaleString('zh-CN') : '-';
+}
+
 export default function Vulnerabilities() {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
@@ -137,6 +141,7 @@ export default function Vulnerabilities() {
         </Space>
       ),
     },
+    { title: '验证时间', dataIndex: 'poc_verified_at', key: 'poc_verified_at', width: 160, render: (value: string | null, record: Vulnerability) => record.poc_status === 'verified' ? formatTime(value) : '-' },
     {
       title: '漏洞描述',
       dataIndex: 'desc',
@@ -206,6 +211,7 @@ export default function Vulnerabilities() {
                 <div style={{ padding: '8px 0' }}>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>描述：{record.desc || '暂无'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>PoC 状态：{pocStatusLabels[record.poc_status] || record.poc_status || '无 PoC'}{record.poc ? ` / ${record.poc}` : ''}</p>
+                  <p style={{ marginBottom: 8, color: '#5f6368' }}>原始验证时间：{record.poc_status === 'verified' ? formatTime(record.poc_verified_at) : '-'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>验证证据：{record.poc_evidence || '暂无'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>修复方案：{record.solution || '暂无'}</p>
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>处置备注：{record.status_note || '暂无'}</p>

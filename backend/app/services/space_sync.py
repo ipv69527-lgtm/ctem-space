@@ -155,6 +155,52 @@ def _poc_detail_evidence(raw: dict[str, Any]) -> str:
     return "\n".join(values)
 
 
+def _parse_datetime(value: Any) -> datetime | None:
+    text = _non_empty_text(value)
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text[:19], fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _merge_poc_verified_at(*values: Any) -> datetime | None:
+    parsed = [value if isinstance(value, datetime) else _parse_datetime(value) for value in values]
+    dates = [value for value in parsed if value]
+    return min(dates) if dates else None
+
+
+def _poc_verified_at(raw: dict[str, Any]) -> datetime | None:
+    dates: list[datetime] = []
+    for key in ("poc_verified_at", "verified_at", "verify_time", "verified_time", "time"):
+        value = _parse_datetime(raw.get(key))
+        if value:
+            dates.append(value)
+    detail = raw.get("poc_detail")
+    if isinstance(detail, dict):
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key in ("time", "verified_at", "verify_time", "verified_time"):
+                    parsed = _parse_datetime(value.get(key))
+                    if parsed:
+                        dates.append(parsed)
+                for nested in value.values():
+                    if isinstance(nested, (dict, list)):
+                        collect(nested)
+            elif isinstance(value, list):
+                for item in value:
+                    collect(item)
+
+        collect(detail)
+    return min(dates) if dates else None
+
+
 def _poc_status(raw: dict[str, Any]) -> str:
     for key in ("poc_status", "verify_status", "verified_status", "status"):
         text = _non_empty_text(raw.get(key)).lower()
@@ -198,6 +244,7 @@ def _with_poc_source(vuln: dict[str, Any], *, verified: bool = False) -> dict[st
     current["poc"] = _merge_csv(current.get("poc"), _poc_text(current, default_from_title=True))
     current["poc_status"] = _merge_poc_status("verified" if verified else "", _poc_status(current), "available")
     current["poc_evidence"] = _merge_csv(current.get("poc_evidence"), _poc_evidence(current))
+    current["poc_verified_at"] = _merge_poc_verified_at(current.get("poc_verified_at"), _poc_verified_at(current))
     return current
 
 
@@ -223,11 +270,13 @@ def _asset_vulns(raw: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(value, list):
             parent_verified = list_key in {"poc_list", "pocs"} and _poc_status(raw) == "verified"
             parent_evidence = _poc_detail_evidence(raw)
+            parent_verified_at = _poc_verified_at(raw)
             for item in value:
                 if isinstance(item, dict):
                     if list_key in {"poc_list", "pocs"}:
                         current = dict(item)
                         current["poc_evidence"] = _merge_csv(current.get("poc_evidence"), parent_evidence)
+                        current["poc_verified_at"] = _merge_poc_verified_at(current.get("poc_verified_at"), parent_verified_at)
                         vulns.append(_with_poc_source(current, verified=parent_verified))
                     else:
                         vulns.append(item)
@@ -240,6 +289,7 @@ def _asset_vulns(raw: dict[str, Any]) -> list[dict[str, Any]]:
                                 "title": text,
                                 "poc_status": "verified" if parent_verified else "available",
                                 "poc_evidence": parent_evidence,
+                                "poc_verified_at": parent_verified_at,
                             },
                             verified=parent_verified,
                         ))
@@ -288,23 +338,27 @@ def _dedupe_vulns(vulns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         current["poc"] = _merge_csv(current.get("poc"), _poc_text(current))
         current["poc_status"] = _merge_poc_status(current.get("poc_status"), _poc_status(current))
         current["poc_evidence"] = _merge_csv(current.get("poc_evidence"), _poc_evidence(current))
+        current["poc_verified_at"] = _merge_poc_verified_at(current.get("poc_verified_at"), _poc_verified_at(current))
         if not existing:
             by_cve[cve] = current
             continue
         merged_poc = _merge_csv(existing.get("poc"), current.get("poc"), _poc_text(existing), _poc_text(current))
         merged_poc_status = _merge_poc_status(existing.get("poc_status"), current.get("poc_status"), _poc_status(existing), _poc_status(current))
         merged_poc_evidence = _merge_csv(existing.get("poc_evidence"), current.get("poc_evidence"), _poc_evidence(existing), _poc_evidence(current))
+        merged_poc_verified_at = _merge_poc_verified_at(existing.get("poc_verified_at"), current.get("poc_verified_at"), _poc_verified_at(existing), _poc_verified_at(current))
         existing_title = _vuln_display_title(existing, cve)
         current_title = _vuln_display_title(current, cve)
         if existing_title.upper() == cve and current_title.upper() != cve:
             current["poc"] = merged_poc
             current["poc_status"] = merged_poc_status
             current["poc_evidence"] = merged_poc_evidence
+            current["poc_verified_at"] = merged_poc_verified_at
             by_cve[cve] = current
         else:
             existing["poc"] = merged_poc
             existing["poc_status"] = merged_poc_status
             existing["poc_evidence"] = merged_poc_evidence
+            existing["poc_verified_at"] = merged_poc_verified_at
     return [*by_cve.values(), *non_cve]
 
 
@@ -1055,6 +1109,7 @@ async def _upsert_vuln(db, raw: dict[str, Any], asset_id: str) -> Vulnerability:
     vuln.poc = _merge_csv(vuln.poc, _poc_text(raw))
     vuln.poc_status = _merge_poc_status(vuln.poc_status, raw.get("poc_status"), _poc_status(raw), "available" if vuln.poc else "")
     vuln.poc_evidence = _merge_csv(vuln.poc_evidence, raw.get("poc_evidence"), _poc_evidence(raw))
+    vuln.poc_verified_at = _merge_poc_verified_at(vuln.poc_verified_at, raw.get("poc_verified_at"), _poc_verified_at(raw))
     vuln.cvss = _cvss(raw.get("cvss_score") or raw.get("cvss") or raw.get("score"))
     vuln.severity = _severity(raw.get("severity") or raw.get("risk") or raw.get("level"))
     desc = _first_text(raw.get("descr"), raw.get("desc"), raw.get("description"))
