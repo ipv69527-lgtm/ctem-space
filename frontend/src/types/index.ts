@@ -53,6 +53,8 @@ export interface Vulnerability {
   title: string;
   cve: string;
   poc: string;
+  poc_status: 'none' | 'available' | 'verified';
+  poc_evidence: string;
   cvss: number;
   severity: '严重' | '高危' | '中危' | '低危';
   asset_ids: string[];
@@ -164,11 +166,25 @@ export interface SyncTaskSummary {
   recent_failed: SyncTask[];
 }
 
+export interface SyncQueryTemplate {
+  id: string;
+  name: string;
+  desc: string;
+  query_payload: Record<string, unknown>;
+  query_condition: string;
+  created_by: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface AssetQualityIssue {
   key: string;
   label: string;
   count: number;
   rate: number;
+  action_label?: string;
+  action_path?: string;
+  action_params?: Record<string, string>;
   samples: { id: string; ip: string; name: string; unit_id: string | null; issue: string }[];
 }
 

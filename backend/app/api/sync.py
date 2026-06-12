@@ -9,10 +9,11 @@ from sqlalchemy import func, or_, select
 from app.config import settings
 from app.database import get_db
 from app.models.space_config import SpaceConfig
+from app.models.sync_query_template import SyncQueryTemplate
 from app.models.sync_task import SyncTask
 from app.models.unit import Unit
 from app.models.user import User
-from app.schemas.sync import SpaceConfigRead, SpaceConfigUpdate, SpaceQueryRequest
+from app.schemas.sync import SpaceConfigRead, SpaceConfigUpdate, SpaceQueryRequest, SyncQueryTemplateCreate, SyncQueryTemplateRead, SyncQueryTemplateUpdate
 from app.services.audit import write_audit_log
 from app.services.auth import require_admin, require_operator, require_reader
 from app.services.space_sync import (
@@ -127,6 +128,115 @@ def _query_payload(body: SpaceQueryRequest, unit: Unit | None) -> str:
     if not query:
         raise HTTPException(status_code=400, detail="请至少填写一个查询条件")
     return query
+
+
+def _clean_query_payload(body: SpaceQueryRequest) -> dict:
+    payload = body.model_dump()
+    return {key: value for key, value in payload.items() if value not in (None, "", [])}
+
+
+@router.get("/query-templates", response_model=list[SyncQueryTemplateRead])
+async def list_query_templates(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_reader),
+):
+    result = await db.execute(select(SyncQueryTemplate).order_by(SyncQueryTemplate.updated_at.desc().nullslast(), SyncQueryTemplate.created_at.desc()))
+    return [SyncQueryTemplateRead.model_validate(item) for item in result.scalars().all()]
+
+
+@router.post("/query-templates", response_model=SyncQueryTemplateRead, status_code=201)
+async def create_query_template(
+    body: SyncQueryTemplateCreate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_operator),
+):
+    query_body = SpaceQueryRequest.model_validate(body.query_payload or {})
+    unit = await _unit_from_optional_id(db, query_body.unit_id)
+    query_condition = _query_payload(query_body, unit)
+    template = SyncQueryTemplate(
+        name=body.name.strip(),
+        desc=body.desc.strip(),
+        query_payload=_clean_query_payload(query_body),
+        query_condition=query_condition,
+        created_by=current_user.username,
+    )
+    db.add(template)
+    await db.flush()
+    await write_audit_log(
+        db,
+        action="sync.query_template.create",
+        target_type="sync_query_template",
+        target_id=template.id,
+        target_name=template.name,
+        detail={"query_condition": query_condition},
+        user=current_user,
+        request=request,
+    )
+    await db.commit()
+    await db.refresh(template)
+    return SyncQueryTemplateRead.model_validate(template)
+
+
+@router.put("/query-templates/{template_id}", response_model=SyncQueryTemplateRead)
+async def update_query_template(
+    template_id: str,
+    body: SyncQueryTemplateUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_operator),
+):
+    result = await db.execute(select(SyncQueryTemplate).where(SyncQueryTemplate.id == template_id))
+    template = result.scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="同步条件模板不存在")
+    query_body = SpaceQueryRequest.model_validate(body.query_payload or {})
+    unit = await _unit_from_optional_id(db, query_body.unit_id)
+    query_condition = _query_payload(query_body, unit)
+    before = {"name": template.name, "query_condition": template.query_condition}
+    template.name = body.name.strip()
+    template.desc = body.desc.strip()
+    template.query_payload = _clean_query_payload(query_body)
+    template.query_condition = query_condition
+    await write_audit_log(
+        db,
+        action="sync.query_template.update",
+        target_type="sync_query_template",
+        target_id=template.id,
+        target_name=template.name,
+        detail={"before": before, "after": {"name": template.name, "query_condition": query_condition}},
+        user=current_user,
+        request=request,
+    )
+    await db.commit()
+    await db.refresh(template)
+    return SyncQueryTemplateRead.model_validate(template)
+
+
+@router.delete("/query-templates/{template_id}")
+async def delete_query_template(
+    template_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_operator),
+):
+    result = await db.execute(select(SyncQueryTemplate).where(SyncQueryTemplate.id == template_id))
+    template = result.scalar_one_or_none()
+    if not template:
+        raise HTTPException(status_code=404, detail="同步条件模板不存在")
+    await db.delete(template)
+    await write_audit_log(
+        db,
+        action="sync.query_template.delete",
+        target_type="sync_query_template",
+        target_id=template.id,
+        target_name=template.name,
+        detail={"query_condition": template.query_condition},
+        user=current_user,
+        request=request,
+    )
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/config", response_model=SpaceConfigRead)

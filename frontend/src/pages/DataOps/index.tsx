@@ -117,6 +117,11 @@ export default function DataOps() {
     queryClient.invalidateQueries({ queryKey: ['asset-quality-report'] });
   };
 
+  const openQualityAssets = (issue: AssetQualityIssue) => {
+    const params = new URLSearchParams(issue.action_params || { quality_issue: issue.key });
+    navigate(`${issue.action_path || '/assets'}?${params.toString()}`);
+  };
+
   return (
     <>
       <Typography.Title level={3} style={{ marginBottom: 24 }}>
@@ -288,6 +293,16 @@ export default function DataOps() {
                         };
                         return suggestions[issue.key] || '-';
                       },
+                    },
+                    {
+                      title: '修正入口',
+                      key: 'action',
+                      width: 130,
+                      render: (_: unknown, issue: AssetQualityIssue) => (
+                        <Button size="small" disabled={!issue.count} onClick={() => openQualityAssets(issue)}>
+                          {issue.action_label || '去修正'}
+                        </Button>
+                      ),
                     },
                   ]}
                   locale={{ emptyText: '暂无质量统计' }}

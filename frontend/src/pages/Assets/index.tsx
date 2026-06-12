@@ -1,14 +1,23 @@
 import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Popover, Checkbox, Tooltip, Modal, Form, message, DatePicker } from 'antd';
-import { ApartmentOutlined, CloudDownloadOutlined, DesktopOutlined, EditOutlined, ReloadOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { ApartmentOutlined, CloudDownloadOutlined, DesktopOutlined, EditOutlined, FolderOpenOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect, useState, type Key } from 'react';
+import dayjs from 'dayjs';
 import apiClient from '@/api/client';
-import type { Asset, Unit } from '@/types';
+import type { Asset, SyncQueryTemplate, Unit } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 
 const ASSET_VISIBLE_COLUMNS_KEY = 'ctem.asset.visibleColumns';
 const DEFAULT_VISIBLE_COLUMNS = ['name', 'ip', 'unit_name', 'type', 'ports', 'risk', 'location', 'last_seen'];
+const QUALITY_ISSUE_OPTIONS = [
+  { value: 'missing_unit', label: '未归属' },
+  { value: 'missing_ports', label: '缺端口' },
+  { value: 'missing_location', label: '缺位置' },
+  { value: 'missing_coordinates', label: '缺经纬度' },
+  { value: 'missing_manufacturer', label: '缺厂商/品牌/型号' },
+  { value: 'missing_raw', label: '缺原始数据' },
+];
 
 function firstText(...values: unknown[]) {
   for (const value of values) {
@@ -115,6 +124,22 @@ function normalizeQueryValues(values: any) {
   };
 }
 
+function templateToFormValues(payload: Record<string, unknown>) {
+  const values: Record<string, unknown> = { ...payload };
+  if (values.startdate || values.enddate) {
+    values.time_range = [
+      values.startdate ? dayjs(String(values.startdate)) : null,
+      values.enddate ? dayjs(String(values.enddate)) : null,
+    ];
+  }
+  delete values.startdate;
+  delete values.enddate;
+  for (const key of ['ports', 'domain', 'ip', 'cve', 'tag', 'custom_tag']) {
+    if (Array.isArray(values[key])) values[key] = (values[key] as unknown[]).join(',');
+  }
+  return values;
+}
+
 export default function Assets() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -128,24 +153,32 @@ export default function Assets() {
   const [service, setService] = useState('');
   const [location, setLocation] = useState('');
   const [hasVulns, setHasVulns] = useState('');
+  const [qualityIssue, setQualityIssue] = useState(searchParams.get('quality_issue') || '');
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumns);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Key[]>([]);
   const [batchUnitOpen, setBatchUnitOpen] = useState(false);
   const [queryModalOpen, setQueryModalOpen] = useState(false);
   const [previewQuery, setPreviewQuery] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [form] = Form.useForm();
   const [batchUnitForm] = Form.useForm();
   const [queryForm] = Form.useForm();
+  const [saveTemplateForm] = Form.useForm();
   const canEdit = currentUser?.role === 'super_admin' || currentUser?.role === 'operator';
 
   useEffect(() => {
     const nextQ = searchParams.get('q') || '';
+    const nextUnitId = searchParams.get('unit_id') || '';
+    const nextQualityIssue = searchParams.get('quality_issue') || '';
     setQ(nextQ);
+    setUnitId(nextUnitId);
+    setQualityIssue(nextQualityIssue);
   }, [searchParams]);
 
   const { data: assets, isLoading, refetch } = useQuery<Asset[]>({
-    queryKey: ['assets', q, unitId, type, risk, port, service, location, hasVulns],
+    queryKey: ['assets', q, unitId, type, risk, port, service, location, hasVulns, qualityIssue],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
@@ -156,6 +189,7 @@ export default function Assets() {
       if (service) params.set('service', service);
       if (location) params.set('location', location);
       if (hasVulns) params.set('has_vulns', hasVulns);
+      if (qualityIssue) params.set('quality_issue', qualityIssue);
       const { data } = await apiClient.get('/assets/?' + params.toString());
       return data;
     },
@@ -169,8 +203,17 @@ export default function Assets() {
     },
   });
 
+  const { data: queryTemplates } = useQuery<SyncQueryTemplate[]>({
+    queryKey: ['sync-query-templates'],
+    queryFn: async () => {
+      const { data } = await apiClient.get('/sync/query-templates');
+      return data;
+    },
+    enabled: canEdit,
+  });
+
   const unitNameById = new Map((units || []).map(unit => [unit.id, unit.name]));
-  const hasFilters = Boolean(q || unitId || type || risk || port || service || location || hasVulns);
+  const hasFilters = Boolean(q || unitId || type || risk || port || service || location || hasVulns || qualityIssue);
   const unitOptions = [
     { value: '__unassigned', label: '未归属' },
     ...(units || []).map(unit => ({ value: unit.id, label: unit.name })),
@@ -226,6 +269,17 @@ export default function Assets() {
     onError: (err: any) => message.error(err.response?.data?.detail || '条件拉取任务提交失败'),
   });
 
+  const saveTemplateMutation = useMutation({
+    mutationFn: (values: { name: string; desc: string; query_payload: Record<string, unknown> }) => apiClient.post('/sync/query-templates', values),
+    onSuccess: () => {
+      message.success('同步条件模板已保存');
+      setSaveTemplateOpen(false);
+      saveTemplateForm.resetFields();
+      queryClient.invalidateQueries({ queryKey: ['sync-query-templates'] });
+    },
+    onError: (err: any) => message.error(err.response?.data?.detail || '模板保存失败'),
+  });
+
   const resetFilters = () => {
     setQ('');
     setUnitId('');
@@ -235,6 +289,7 @@ export default function Assets() {
     setService('');
     setLocation('');
     setHasVulns('');
+    setQualityIssue('');
   };
 
   const setVisibleColumns = (keys: string[]) => {
@@ -268,6 +323,25 @@ export default function Assets() {
   const submitAsset = (values: any) => {
     if (!editingAsset) return;
     updateMutation.mutate({ id: editingAsset.id, body: values });
+  };
+
+  const loadQueryTemplate = () => {
+    const template = (queryTemplates || []).find(item => item.id === selectedTemplateId);
+    if (!template) {
+      message.warning('请选择同步条件模板');
+      return;
+    }
+    queryForm.setFieldsValue(templateToFormValues(template.query_payload || {}));
+    setPreviewQuery(template.query_condition || '');
+  };
+
+  const submitQueryTemplate = async () => {
+    const [templateValues, queryValues] = await Promise.all([saveTemplateForm.validateFields(), queryForm.validateFields()]);
+    saveTemplateMutation.mutate({
+      name: templateValues.name,
+      desc: templateValues.desc || '',
+      query_payload: normalizeQueryValues(queryValues),
+    });
   };
 
   const allColumns = [
@@ -344,6 +418,8 @@ export default function Assets() {
         <Input placeholder="位置" value={location} onChange={e => setLocation(e.target.value)} style={{ width: 130, borderRadius: 10 }} allowClear />
         <Select placeholder="漏洞" value={hasVulns || undefined} onChange={value => setHasVulns(value || '')} style={{ width: 130 }} allowClear
           options={[{ value: 'yes', label: '有关联漏洞' }, { value: 'no', label: '无关联漏洞' }]} />
+        <Select placeholder="质量项" value={qualityIssue || undefined} onChange={value => setQualityIssue(value || '')} style={{ width: 170 }} allowClear
+          options={QUALITY_ISSUE_OPTIONS} />
         <Button icon={<ReloadOutlined />} onClick={() => refetch()}>刷新</Button>
         {canEdit && <Button type="primary" icon={<CloudDownloadOutlined />} onClick={() => setQueryModalOpen(true)}>条件拉取</Button>}
         {canEdit && (
@@ -451,6 +527,7 @@ export default function Assets() {
         onCancel={() => { setQueryModalOpen(false); setPreviewQuery(''); queryForm.resetFields(); }}
         footer={[
           <Button key="cancel" onClick={() => { setQueryModalOpen(false); setPreviewQuery(''); queryForm.resetFields(); }}>取消</Button>,
+          <Button key="save-template" icon={<SaveOutlined />} onClick={() => queryForm.validateFields().then(() => setSaveTemplateOpen(true))}>保存模板</Button>,
           <Button key="preview" loading={previewMutation.isPending} onClick={() => queryForm.validateFields().then(values => previewMutation.mutate(values))}>预览查询</Button>,
           <Button key="submit" type="primary" loading={triggerQueryMutation.isPending} onClick={() => queryForm.validateFields().then(values => triggerQueryMutation.mutate(values))}>提交拉取</Button>,
         ]}
@@ -460,6 +537,19 @@ export default function Assets() {
           <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
             归属单位可不选；未能自动匹配单位的资产会进入未归属资产池，可在资产管理中人工修正。
           </Typography.Paragraph>
+          <Space style={{ marginBottom: 16, flexWrap: 'wrap' }}>
+            <Select
+              placeholder="选择常用同步条件"
+              value={selectedTemplateId || undefined}
+              onChange={value => setSelectedTemplateId(value || '')}
+              style={{ width: 260 }}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              options={(queryTemplates || []).map(template => ({ value: template.id, label: template.name }))}
+            />
+            <Button icon={<FolderOpenOutlined />} onClick={loadQueryTemplate}>载入模板</Button>
+          </Space>
           <Typography.Text strong>资产范围</Typography.Text>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0 16px', marginTop: 10 }}>
             <Form.Item name="unit_id" label="限定单位（可选）">
@@ -623,6 +713,25 @@ export default function Assets() {
               <pre style={{ marginTop: 8, padding: 12, background: '#f6f8fa', borderRadius: 8, whiteSpace: 'pre-wrap' }}>{previewQuery}</pre>
             </Typography.Paragraph>
           )}
+        </Form>
+      </Modal>
+
+      <Modal
+        title="保存同步条件模板"
+        open={saveTemplateOpen}
+        onOk={submitQueryTemplate}
+        onCancel={() => { setSaveTemplateOpen(false); saveTemplateForm.resetFields(); }}
+        confirmLoading={saveTemplateMutation.isPending}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={saveTemplateForm} layout="vertical">
+          <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
+            <Input placeholder="如：合肥 HTTPS 资产" />
+          </Form.Item>
+          <Form.Item name="desc" label="说明">
+            <Input.TextArea rows={3} placeholder="记录适用场景、城市、端口、服务类型等" />
+          </Form.Item>
         </Form>
       </Modal>
     </>

@@ -121,6 +121,7 @@ def check(name: str, func) -> None:
 token = ""
 created_template_id = ""
 created_report_id = ""
+created_sync_template_id = ""
 asset_restore = None
 
 
@@ -165,14 +166,18 @@ def core_data_check() -> None:
     assert isinstance(assets, list)
     assert isinstance(vulns, list)
     assert all("poc" in item for item in vulns)
+    assert all("poc_status" in item for item in vulns)
     assert isinstance(templates, list)
     assert isinstance(reports, list)
     assert "total_assets" in quality
     assert "assigned_assets" in quality_report
     assert "issues" in quality_report
+    assert all("action_params" in item for item in quality_report["issues"])
     assert "success_rate" in sync_summary
     assert isinstance(sync_tasks, list)
     assert len(templates) >= 4
+    quality_assets = request("GET", "/assets/?quality_issue=missing_unit", token=token)
+    assert isinstance(quality_assets, list)
 
 
 def validation_check() -> None:
@@ -300,8 +305,40 @@ def template_report_check() -> None:
     assert {"template.create", "template.update", "template.file_upload"}.issubset(actions)
 
 
+def sync_template_check() -> None:
+    global created_sync_template_id
+    marker = f"验收同步模板-{int(time.time())}"
+    template = request(
+        "POST",
+        "/sync/query-templates",
+        {
+            "name": marker,
+            "desc": "自动验收后删除",
+            "query_payload": {"city": "合肥", "ports": ["443"], "service": "https"},
+        },
+        token=token,
+        expect=201,
+    )
+    created_sync_template_id = template["id"]
+    assert 'city:"合肥"' in template["query_condition"]
+    templates = request("GET", "/sync/query-templates", token=token)
+    assert any(item["id"] == created_sync_template_id for item in templates)
+    patched = request(
+        "PUT",
+        f"/sync/query-templates/{created_sync_template_id}",
+        {
+            "name": f"{marker}-更新",
+            "desc": "自动验收后删除",
+            "query_payload": {"city": "合肥", "ports": ["443"], "support_type": "中间件"},
+        },
+        token=token,
+    )
+    assert patched["name"].endswith("更新")
+    assert 'port:"443"' in patched["query_condition"]
+
+
 def cleanup() -> None:
-    global created_report_id, created_template_id, asset_restore
+    global created_report_id, created_template_id, created_sync_template_id, asset_restore
     if created_report_id:
         try:
             request("DELETE", f"/reports/{created_report_id}", token=token)
@@ -312,6 +349,11 @@ def cleanup() -> None:
             request("DELETE", f"/templates/{created_template_id}", token=token)
         finally:
             created_template_id = ""
+    if created_sync_template_id:
+        try:
+            request("DELETE", f"/sync/query-templates/{created_sync_template_id}", token=token)
+        finally:
+            created_sync_template_id = ""
     if asset_restore:
         asset_id, original = asset_restore
         try:
@@ -328,6 +370,7 @@ try:
     check("validation", validation_check)
     check("asset-edit", asset_edit_check)
     check("template-report", template_report_check)
+    check("sync-template", sync_template_check)
 finally:
     cleanup()
 

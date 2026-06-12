@@ -16,6 +16,7 @@ router = APIRouter()
 
 VULN_STATUSES = {"待确认", "待整改", "整改中", "待复测", "已修复", "误报", "接受风险"}
 VULN_SEVERITIES = {"严重", "高危", "中危", "低危"}
+POC_STATUSES = {"none", "available", "verified"}
 
 
 async def _validate_vuln_payload(db: AsyncSession, body: VulnerabilityCreate) -> None:
@@ -25,6 +26,8 @@ async def _validate_vuln_payload(db: AsyncSession, body: VulnerabilityCreate) ->
         raise HTTPException(status_code=400, detail="不支持的漏洞等级")
     if body.cvss < 0 or body.cvss > 10:
         raise HTTPException(status_code=400, detail="CVSS 必须在 0 到 10 之间")
+    if body.poc_status not in POC_STATUSES:
+        raise HTTPException(status_code=400, detail="不支持的 PoC 状态")
     asset_ids = list(dict.fromkeys(body.asset_ids or []))
     if asset_ids:
         result = await db.execute(select(Asset.id).where(Asset.id.in_(asset_ids)))
@@ -40,6 +43,7 @@ async def list_vulns(
     severity: str = Query(""),
     status: str = Query(""),
     poc: str = Query(""),
+    poc_status: str = Query(""),
     asset_id: str = Query(""),
     unit_id: str = Query(""),
     ip: str = Query(""),
@@ -54,6 +58,7 @@ async def list_vulns(
                 Vulnerability.title.ilike(pattern),
                 Vulnerability.cve.ilike(pattern),
                 Vulnerability.poc.ilike(pattern),
+                Vulnerability.poc_evidence.ilike(pattern),
                 Vulnerability.desc.ilike(pattern),
                 Vulnerability.solution.ilike(pattern),
                 Vulnerability.status_note.ilike(pattern),
@@ -63,10 +68,14 @@ async def list_vulns(
         stmt = stmt.where(Vulnerability.severity == severity)
     if status:
         stmt = stmt.where(Vulnerability.status == status)
+    if poc_status:
+        if poc_status not in POC_STATUSES:
+            raise HTTPException(status_code=400, detail="不支持的 PoC 状态")
+        stmt = stmt.where(Vulnerability.poc_status == poc_status)
     if poc == "yes":
-        stmt = stmt.where(Vulnerability.poc != "")
+        stmt = stmt.where(or_(Vulnerability.poc != "", Vulnerability.poc_status.in_(["available", "verified"])))
     elif poc == "no":
-        stmt = stmt.where(Vulnerability.poc == "")
+        stmt = stmt.where(Vulnerability.poc == "", Vulnerability.poc_status == "none")
     if asset_id:
         stmt = stmt.where(Vulnerability.asset_ids.any(asset_id))
     if unit_id or ip:
@@ -111,7 +120,7 @@ async def create_vuln(
         target_type="vulnerability",
         target_id=vuln.id,
         target_name=vuln.title,
-        detail={"severity": vuln.severity, "status": vuln.status, "poc": vuln.poc, "asset_count": len(vuln.asset_ids or [])},
+        detail={"severity": vuln.severity, "status": vuln.status, "poc": vuln.poc, "poc_status": vuln.poc_status, "asset_count": len(vuln.asset_ids or [])},
         user=current_user,
         request=request,
     )
@@ -133,7 +142,7 @@ async def update_vuln(
     if not vuln:
         raise HTTPException(status_code=404, detail="漏洞不存在")
     await _validate_vuln_payload(db, body)
-    before = {"title": vuln.title, "severity": vuln.severity, "status": vuln.status, "poc": vuln.poc}
+    before = {"title": vuln.title, "severity": vuln.severity, "status": vuln.status, "poc": vuln.poc, "poc_status": vuln.poc_status}
     for key, value in body.model_dump().items():
         setattr(vuln, key, value)
     await write_audit_log(
@@ -142,7 +151,7 @@ async def update_vuln(
         target_type="vulnerability",
         target_id=vuln.id,
         target_name=vuln.title,
-        detail={"before": before, "after": {"title": vuln.title, "severity": vuln.severity, "status": vuln.status, "poc": vuln.poc}},
+        detail={"before": before, "after": {"title": vuln.title, "severity": vuln.severity, "status": vuln.status, "poc": vuln.poc, "poc_status": vuln.poc_status}},
         user=current_user,
         request=request,
     )

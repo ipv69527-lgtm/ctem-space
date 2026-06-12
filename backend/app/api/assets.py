@@ -58,6 +58,22 @@ def _quality_sample(asset: Asset, issue: str) -> dict[str, str | None]:
     return {"id": asset.id, "ip": asset.ip, "name": asset.name, "unit_id": asset.unit_id, "issue": issue}
 
 
+def _asset_matches_quality_issue(asset: Asset, issue: str) -> bool:
+    if issue == "missing_unit":
+        return not asset.unit_id
+    if issue == "missing_ports":
+        return not asset.ports
+    if issue == "missing_location":
+        return not asset.location
+    if issue == "missing_coordinates":
+        return not (_raw_value(asset, ("longitude", "lng")) and _raw_value(asset, ("latitude", "lat")))
+    if issue == "missing_manufacturer":
+        return not _raw_value(asset, MANUFACTURER_KEYS)
+    if issue == "missing_raw":
+        return not _raw_items(asset)
+    return True
+
+
 @router.get("/", response_model=list[AssetRead])
 async def list_assets(
     q: str = Query(""),
@@ -69,6 +85,7 @@ async def list_assets(
     location: str = Query(""),
     isp: str = Query(""),
     has_vulns: str = Query(""),
+    quality_issue: str = Query(""),
     db: AsyncSession = Depends(get_db), _: User = Depends(require_reader),
 ):
     stmt = select(Asset)
@@ -104,9 +121,22 @@ async def list_assets(
         stmt = stmt.where(Asset.vuln_ids != [])
     elif has_vulns == "no":
         stmt = stmt.where(Asset.vuln_ids == [])
+    if quality_issue == "missing_unit":
+        stmt = stmt.where(Asset.unit_id.is_(None))
+    elif quality_issue == "missing_ports":
+        stmt = stmt.where(Asset.ports == "")
+    elif quality_issue == "missing_location":
+        stmt = stmt.where(Asset.location == "")
+    elif quality_issue == "missing_raw":
+        stmt = stmt.where(func.jsonb_array_length(Asset.raw_data) == 0)
+    elif quality_issue and quality_issue not in {"missing_coordinates", "missing_manufacturer"}:
+        raise HTTPException(status_code=400, detail="不支持的数据质量筛选项")
     stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
     result = await db.execute(stmt)
-    return [AssetRead.model_validate(a) for a in result.scalars().all()]
+    assets = list(result.scalars().all())
+    if quality_issue in {"missing_coordinates", "missing_manufacturer"}:
+        assets = [asset for asset in assets if _asset_matches_quality_issue(asset, quality_issue)]
+    return [AssetRead.model_validate(a) for a in assets]
 
 
 @router.get("/quality/summary")
@@ -192,6 +222,14 @@ async def asset_quality_report(
         ("missing_manufacturer", missing_manufacturer, "缺厂商/品牌/型号"),
         ("missing_raw", missing_raw, "缺原始数据"),
     ]
+    action_labels = {
+        "missing_unit": "去批量归属",
+        "missing_ports": "去补端口",
+        "missing_location": "去补位置",
+        "missing_coordinates": "去补经纬度",
+        "missing_manufacturer": "去补厂商",
+        "missing_raw": "查看缺原始数据资产",
+    }
     return {
         "total_assets": total,
         "assigned_assets": assigned,
@@ -209,6 +247,9 @@ async def asset_quality_report(
                 "count": len(items),
                 "rate": round(len(items) / total * 100, 2) if total else 0,
                 "samples": [_quality_sample(asset, label) for asset in items[:10]],
+                "action_label": action_labels.get(key, "去修正"),
+                "action_path": "/assets",
+                "action_params": {"quality_issue": key},
             }
             for key, items, label in issue_specs
         ],

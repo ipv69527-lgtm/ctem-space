@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 SpaceAuthType = Literal["auto", "rayspace", "bearer", "api_key", "basic", "none"]
@@ -79,3 +79,29 @@ class SpaceQueryRequest(BaseModel):
     dept: str = ""
     ip_company_full: str = ""
     keyword: str = ""
+
+
+class SyncQueryTemplateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    desc: str = ""
+    query_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class SyncQueryTemplateUpdate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    desc: str = ""
+    query_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class SyncQueryTemplateRead(BaseModel):
+    id: str
+    name: str
+    desc: str
+    query_payload: dict[str, Any]
+    query_condition: str
+    created_by: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

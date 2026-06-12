@@ -125,9 +125,53 @@ def _poc_text(raw: dict[str, Any], *, default_from_title: bool = False) -> str:
     return ""
 
 
-def _with_poc_source(vuln: dict[str, Any]) -> dict[str, Any]:
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = _non_empty_text(value).lower()
+    return text in {"1", "true", "yes", "y", "命中", "成功", "验证成功", "已验证", "verified", "validated", "matched", "hit", "success"}
+
+
+def _poc_status(raw: dict[str, Any]) -> str:
+    for key in ("poc_status", "verify_status", "verified_status", "status"):
+        text = _non_empty_text(raw.get(key)).lower()
+        if text in {"verified", "validated", "hit", "matched", "success", "已验证", "命中"}:
+            return "verified"
+        if text in {"available", "exists", "exist", "present", "有", "存在"}:
+            return "available"
+    if any(_truthy(raw.get(key)) for key in ("poc_verified", "verified", "validated", "is_verified", "matched", "hit", "success")):
+        return "verified"
+    if _first_text(raw.get("evidence"), raw.get("proof"), raw.get("verify_result"), raw.get("exploit_result")):
+        return "verified"
+    if _poc_text(raw):
+        return "available"
+    return "none"
+
+
+def _merge_poc_status(*values: Any) -> str:
+    statuses = {_non_empty_text(value) for value in values if _non_empty_text(value)}
+    if "verified" in statuses:
+        return "verified"
+    if "available" in statuses:
+        return "available"
+    return "none"
+
+
+def _poc_evidence(raw: dict[str, Any]) -> str:
+    return _merge_csv(
+        raw.get("evidence"),
+        raw.get("proof"),
+        raw.get("verify_result"),
+        raw.get("exploit_result"),
+        raw.get("detail_text"),
+    )
+
+
+def _with_poc_source(vuln: dict[str, Any], *, verified: bool = False) -> dict[str, Any]:
     current = dict(vuln)
     current["poc"] = _merge_csv(current.get("poc"), _poc_text(current, default_from_title=True))
+    current["poc_status"] = _merge_poc_status("verified" if verified else "", _poc_status(current), "available")
+    current["poc_evidence"] = _merge_csv(current.get("poc_evidence"), _poc_evidence(current))
     return current
 
 
@@ -147,7 +191,7 @@ def _asset_vulns(raw: dict[str, Any]) -> list[dict[str, Any]]:
                     if isinstance(items, list):
                         for item in items:
                             vuln = item if isinstance(item, dict) else {"title": str(item)}
-                            vulns.append(_with_poc_source(vuln) if detail_key == "poc_detail" else vuln)
+                            vulns.append(_with_poc_source(vuln, verified=detail_key == "poc_detail") if detail_key == "poc_detail" else vuln)
     for list_key in ("poc_list", "cves", "cve", "pocs"):
         value = raw.get(list_key)
         if isinstance(value, list):
@@ -198,17 +242,25 @@ def _dedupe_vulns(vulns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         current["cve"] = cve
         existing = by_cve.get(cve)
         current["poc"] = _merge_csv(current.get("poc"), _poc_text(current))
+        current["poc_status"] = _merge_poc_status(current.get("poc_status"), _poc_status(current))
+        current["poc_evidence"] = _merge_csv(current.get("poc_evidence"), _poc_evidence(current))
         if not existing:
             by_cve[cve] = current
             continue
         merged_poc = _merge_csv(existing.get("poc"), current.get("poc"), _poc_text(existing), _poc_text(current))
+        merged_poc_status = _merge_poc_status(existing.get("poc_status"), current.get("poc_status"), _poc_status(existing), _poc_status(current))
+        merged_poc_evidence = _merge_csv(existing.get("poc_evidence"), current.get("poc_evidence"), _poc_evidence(existing), _poc_evidence(current))
         existing_title = _vuln_display_title(existing, cve)
         current_title = _vuln_display_title(current, cve)
         if existing_title.upper() == cve and current_title.upper() != cve:
             current["poc"] = merged_poc
+            current["poc_status"] = merged_poc_status
+            current["poc_evidence"] = merged_poc_evidence
             by_cve[cve] = current
         else:
             existing["poc"] = merged_poc
+            existing["poc_status"] = merged_poc_status
+            existing["poc_evidence"] = merged_poc_evidence
     return [*by_cve.values(), *non_cve]
 
 
@@ -957,6 +1009,8 @@ async def _upsert_vuln(db, raw: dict[str, Any], asset_id: str) -> Vulnerability:
     if not cve or title.upper() != cve or vuln.title.upper() == cve:
         vuln.title = title
     vuln.poc = _merge_csv(vuln.poc, _poc_text(raw))
+    vuln.poc_status = _merge_poc_status(vuln.poc_status, raw.get("poc_status"), _poc_status(raw), "available" if vuln.poc else "")
+    vuln.poc_evidence = _merge_csv(vuln.poc_evidence, raw.get("poc_evidence"), _poc_evidence(raw))
     vuln.cvss = _cvss(raw.get("cvss_score") or raw.get("cvss") or raw.get("score"))
     vuln.severity = _severity(raw.get("severity") or raw.get("risk") or raw.get("level"))
     desc = _first_text(raw.get("descr"), raw.get("desc"), raw.get("description"))
