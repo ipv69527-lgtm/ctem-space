@@ -28,7 +28,7 @@ const menuItems: MenuProps['items'] = [
     icon: coloredIcon(FundViewOutlined, '/screen'),
     label: '大屏展示',
     children: [
-      { key: '/screen/leadership', icon: coloredIcon(FundViewOutlined, '/screen/leadership'), label: '领导驾驶舱' },
+      { key: '/screen/leadership', icon: coloredIcon(FundViewOutlined, '/screen/leadership'), label: '驾驶舱' },
       { key: '/screen', icon: coloredIcon(FundViewOutlined, '/screen'), label: '区域作战指挥图' },
     ],
   },

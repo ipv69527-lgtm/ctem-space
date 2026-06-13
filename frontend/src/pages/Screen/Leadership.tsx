@@ -3,6 +3,7 @@ import { Button, Progress, Space, Tag, Typography } from 'antd';
 import {
   AlertOutlined,
   ApartmentOutlined,
+  ArrowLeftOutlined,
   BankOutlined,
   CloudSyncOutlined,
   DesktopOutlined,
@@ -23,9 +24,28 @@ import type { Asset, AssetQualityReport, DashboardData, SyncTask, SyncTaskSummar
 echarts.use([BarChart, EffectScatterChart, LineChart, MapChart, PieChart, GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 
 const ANHUI_URL = '/maps/anhui.json';
+const ANHUI_CITY_URL_PREFIX = '/maps/anhui-cities';
 const geoCache: Record<string, unknown> = {};
 const riskColors: Record<string, string> = { 严重: '#ff4d4f', 高危: '#fa8c16', 中危: '#2f80ed', 低危: '#34c759' };
 const fixedStatuses = new Set(['已修复', '误报', '接受风险']);
+const riskWeight: Record<string, number> = { 严重: 12, 高危: 8, 中危: 4, 低危: 1 };
+
+type MapLevel = 'city' | 'county';
+
+interface MapRegion {
+  level: MapLevel;
+  mapName: string;
+  label: string;
+  url: string;
+  parent?: MapRegion;
+}
+
+const ANHUI_REGION: MapRegion = {
+  level: 'city',
+  mapName: 'anhui_leadership_city',
+  label: '安徽省市级态势',
+  url: ANHUI_URL,
+};
 
 interface AssetLocation {
   id: string;
@@ -84,13 +104,47 @@ function sameDay(left: Date, value?: string | null) {
   return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
 }
 
-async function loadGeoJSON() {
-  if (geoCache.anhui) return geoCache.anhui;
-  const resp = await fetch(ANHUI_URL);
-  if (!resp.ok) throw new Error('Failed to load Anhui map');
+async function loadGeoJSON(url: string, key: string) {
+  if (geoCache[key]) return geoCache[key];
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('Failed to load map');
   const data = await resp.json();
-  geoCache.anhui = data;
+  geoCache[key] = data;
   return data;
+}
+
+function pointInRing(point: [number, number], ring: number[][]) {
+  const [lng, lat] = point;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [lng1, lat1] = ring[i];
+    const [lng2, lat2] = ring[j];
+    const intersects = ((lat1 > lat) !== (lat2 > lat))
+      && (lng < ((lng2 - lng1) * (lat - lat1)) / (lat2 - lat1) + lng1);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygon(point: [number, number], coordinates: number[][][]) {
+  if (!coordinates.length || !pointInRing(point, coordinates[0])) return false;
+  return !coordinates.slice(1).some((ring) => pointInRing(point, ring));
+}
+
+function featureContainsPoint(feature: any, point: [number, number]) {
+  const geometry = feature?.geometry;
+  if (!geometry) return false;
+  if (geometry.type === 'Polygon') return pointInPolygon(point, geometry.coordinates);
+  if (geometry.type === 'MultiPolygon') return geometry.coordinates.some((polygon: number[][][]) => pointInPolygon(point, polygon));
+  return false;
+}
+
+function areaColor(score: number, index: number) {
+  if (score >= 60) return '#7f1d1d';
+  if (score >= 30) return '#b45309';
+  if (score >= 12) return '#1d4ed8';
+  if (score > 0) return '#0f766e';
+  return index % 2 === 0 ? '#102f55' : '#0b2748';
 }
 
 const panelStyle: React.CSSProperties = {
@@ -154,6 +208,7 @@ export default function LeadershipScreen() {
   const unitRef = useRef<HTMLDivElement>(null);
   const funnelRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(new Date());
+  const [currentRegion, setCurrentRegion] = useState<MapRegion>(ANHUI_REGION);
 
   const { data: stats } = useQuery<DashboardData>({
     queryKey: ['dashboard-stats'],
@@ -231,6 +286,18 @@ export default function LeadershipScreen() {
     setNow(new Date());
   };
 
+  const resetMap = () => setCurrentRegion(ANHUI_REGION);
+  const goBackMap = () => currentRegion.parent && setCurrentRegion(currentRegion.parent);
+  const drillToCountyLevel = (name: string, adcode: number) => {
+    setCurrentRegion({
+      level: 'county',
+      mapName: `anhui_leadership_county_${adcode}`,
+      label: `${name}区县级态势`,
+      url: `${ANHUI_CITY_URL_PREFIX}/${adcode}.json`,
+      parent: ANHUI_REGION,
+    });
+  };
+
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
@@ -241,18 +308,32 @@ export default function LeadershipScreen() {
     let canceled = false;
     const render = async () => {
       if (!mapRef.current) return;
-      const geoJSON = await loadGeoJSON();
+      const geoJSON = await loadGeoJSON(currentRegion.url, currentRegion.mapName);
       if (canceled || !mapRef.current) return;
-      echarts.registerMap('anhui_leadership', geoJSON as any);
+      echarts.registerMap(currentRegion.mapName, geoJSON as any);
       chart = echarts.init(mapRef.current);
       const points = (assetLocations || [])
         .map(asset => ({
           name: asset.name || asset.ip,
-          value: [Number(asset.longitude), Number(asset.latitude), Math.max(asset.vuln_count || 1, 1)],
+          value: [Number(asset.longitude), Number(asset.latitude), Math.max(riskWeight[asset.risk] || 4, asset.vuln_count || 1)],
           asset,
           itemStyle: { color: riskColors[asset.risk] || '#2f80ed' },
         }))
         .filter(item => Number.isFinite(item.value[0]) && Number.isFinite(item.value[1]));
+      const areaData = (geoJSON as any).features.map((feature: any, index: number) => {
+        const assetsInArea = points.filter(point => featureContainsPoint(feature, [Number(point.value[0]), Number(point.value[1])]));
+        const score = assetsInArea.reduce((sum, point) => sum + (riskWeight[point.asset.risk] || 1) + (point.asset.vuln_count || 0), 0);
+        return {
+          name: feature.properties.name,
+          value: score,
+          asset_count: assetsInArea.length,
+          high_assets: assetsInArea.filter(point => ['严重', '高危'].includes(point.asset.risk)).length,
+          vuln_count: assetsInArea.reduce((sum, point) => sum + (point.asset.vuln_count || 0), 0),
+          adcode: feature.properties.adcode,
+          properties: feature.properties,
+          itemStyle: { areaColor: areaColor(score, index) },
+        };
+      });
       chart.setOption({
         backgroundColor: 'transparent',
         tooltip: {
@@ -261,17 +342,27 @@ export default function LeadershipScreen() {
           borderColor: 'rgba(89,196,255,.28)',
           textStyle: { color: '#dcecff' },
           formatter: (params: any) => {
+            if (params.seriesType === 'map') {
+              const item = params.data || {};
+              return [
+                `<strong>${params.name}</strong>`,
+                `资产数：${item.asset_count || 0}`,
+                `高风险资产：${item.high_assets || 0}`,
+                `关联漏洞：${item.vuln_count || 0}`,
+                currentRegion.level === 'city' ? '点击下钻到区县级' : '区县级态势',
+              ].join('<br/>');
+            }
             const asset = params.data?.asset;
             if (!asset) return params.name;
             return `${asset.name || asset.ip}<br/>IP：${asset.ip}<br/>风险：${asset.risk}<br/>漏洞：${asset.vuln_count || 0}`;
           },
         },
         geo: {
-          map: 'anhui_leadership',
+          map: currentRegion.mapName,
           roam: false,
-          zoom: 1.08,
+          zoom: currentRegion.level === 'city' ? 1.08 : 1,
           layoutCenter: ['50%', '52%'],
-          layoutSize: '96%',
+          layoutSize: currentRegion.level === 'city' ? '96%' : '92%',
           itemStyle: {
             areaColor: '#102f55',
             borderColor: '#4cb8ff',
@@ -284,7 +375,14 @@ export default function LeadershipScreen() {
         },
         visualMap: { show: false, min: 0, max: 20, inRange: { color: ['#1d6fb8', '#faad14', '#ff4d4f'] } },
         series: [
-          { type: 'map', map: 'anhui_leadership', geoIndex: 0, data: [] },
+          {
+            type: 'map',
+            map: currentRegion.mapName,
+            geoIndex: 0,
+            data: areaData,
+            itemStyle: { borderColor: '#4cb8ff', borderWidth: 0.75 },
+            emphasis: { itemStyle: { areaColor: '#255f95', borderColor: '#9bd7ff', borderWidth: 1.15 } },
+          },
           {
             name: '资产点位',
             type: 'effectScatter',
@@ -296,6 +394,13 @@ export default function LeadershipScreen() {
           },
         ],
       });
+      chart.off('click');
+      chart.on('click', (params: any) => {
+        const data = params.data || {};
+        const name = params.name || data.name || data.properties?.name;
+        const adcode = Number(data.adcode || data.properties?.adcode);
+        if (currentRegion.level === 'city' && Number.isFinite(adcode)) drillToCountyLevel(name, adcode);
+      });
     };
     render();
     const onResize = () => chart?.resize();
@@ -305,7 +410,7 @@ export default function LeadershipScreen() {
       window.removeEventListener('resize', onResize);
       chart?.dispose();
     };
-  }, [assetLocations]);
+  }, [assetLocations, currentRegion]);
 
   useEffect(() => {
     if (!trendRef.current) return;
@@ -381,7 +486,7 @@ export default function LeadershipScreen() {
         <Space size={12}>
           <FundViewOutlined style={{ color: '#59c4ff', fontSize: 28 }} />
           <div>
-            <Typography.Title level={2} style={{ color: '#fff', margin: 0, letterSpacing: 0 }}>CTEM 领导驾驶舱</Typography.Title>
+            <Typography.Title level={2} style={{ color: '#fff', margin: 0, letterSpacing: 0 }}>CTEM 驾驶舱</Typography.Title>
             <Typography.Text style={{ color: '#8fb4d8' }}>暴露面风险、修复进展、单位责任和数据质量一屏掌握</Typography.Text>
           </div>
         </Space>
@@ -422,6 +527,9 @@ export default function LeadershipScreen() {
           <div style={{ ...panelTitleStyle, padding: '14px 16px 0', marginBottom: 0 }}>
             <span>安徽区域风险热力图</span>
             <Space size={8}>
+              <Typography.Text style={{ color: '#9fc7e8', fontSize: 12 }}>{currentRegion.label}</Typography.Text>
+              <Button size="small" ghost icon={<ArrowLeftOutlined />} onClick={goBackMap} disabled={!currentRegion.parent}>上一级</Button>
+              <Button size="small" ghost icon={<ReloadOutlined />} onClick={resetMap}>重置</Button>
               <Tag color="red">高风险资产 {highRiskAssets}</Tag>
               <Tag color="orange">同步失败 {syncSummary?.failed || 0}</Tag>
             </Space>
