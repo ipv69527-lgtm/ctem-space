@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,104 @@ router = APIRouter()
 VULN_STATUSES = {"待确认", "待整改", "整改中", "待复测", "已修复", "误报", "接受风险"}
 VULN_SEVERITIES = {"严重", "高危", "中危", "低危"}
 POC_STATUSES = {"none", "available", "verified"}
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ",".join(str(item) for item in value if item is not None)
+    return str(value)
+
+
+def _raw_items(asset: Asset) -> list[dict[str, Any]]:
+    return [item for item in (asset.raw_data or []) if isinstance(item, dict)]
+
+
+def _list_contains(value: Any, needle: str) -> bool:
+    if not needle:
+        return False
+    needle_lower = needle.lower()
+    if isinstance(value, list):
+        return any(needle_lower in _text(item).lower() for item in value)
+    return needle_lower in _text(value).lower()
+
+
+def _detail_contains(value: Any, needle: str) -> bool:
+    if not needle:
+        return False
+    needle_lower = needle.lower()
+    if isinstance(value, dict):
+        return any(needle_lower in _text(key).lower() or _detail_contains(item, needle) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_detail_contains(item, needle) for item in value)
+    return needle_lower in _text(value).lower()
+
+
+def _collect_detail_times(value: Any, values: list[str]) -> None:
+    if isinstance(value, dict):
+        for key in ("time", "date", "verified_at", "verify_time", "verified_time", "created_at", "updated_at"):
+            text = _text(value.get(key)).strip()
+            if text and text not in values:
+                values.append(text)
+        for nested in value.values():
+            if isinstance(nested, (dict, list)):
+                _collect_detail_times(nested, values)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_detail_times(item, values)
+
+
+def _vuln_source_for_asset(vuln: Vulnerability, asset: Asset) -> dict[str, Any]:
+    fields: list[str] = []
+    times: list[str] = []
+    matched = 0
+    cve = (vuln.cve or "").strip()
+    poc = (vuln.poc or vuln.title or "").strip()
+
+    def add_field(field: str) -> None:
+        if field not in fields:
+            fields.append(field)
+
+    for item in _raw_items(asset):
+        item_matched = False
+        if cve and (_list_contains(item.get("cve"), cve) or _list_contains(item.get("cves"), cve)):
+            add_field("cve")
+            item_matched = True
+        if cve and _detail_contains(item.get("cve_detail"), cve):
+            add_field("cve_detail")
+            item_matched = True
+        if poc and (_list_contains(item.get("pocs"), poc) or _list_contains(item.get("poc_list"), poc)):
+            add_field("pocs")
+            item_matched = True
+        if poc and _detail_contains(item.get("poc_detail"), poc):
+            add_field("poc_detail")
+            item_matched = True
+        for field in ("vulnerabilities", "vulns", "risks"):
+            if _detail_contains(item.get(field), cve or poc):
+                add_field(field)
+                item_matched = True
+        if not item_matched:
+            continue
+        matched += 1
+        for key in ("date", "time", "created_at", "updated_at", "last_seen"):
+            text = _text(item.get(key)).strip()
+            if text and text not in times:
+                times.append(text)
+        _collect_detail_times(item.get("poc_detail"), times)
+        _collect_detail_times(item.get("cve_detail"), times)
+
+    if not fields and vuln.poc_status == "verified":
+        add_field("poc_detail")
+    elif not fields and cve:
+        add_field("cve")
+
+    return {
+        "source_fields": fields,
+        "source_summary": " / ".join(fields) if fields else "关联资产",
+        "source_record_count": matched,
+        "source_time": min(times) if times else None,
+    }
 
 
 async def _validate_vuln_payload(db: AsyncSession, body: VulnerabilityCreate) -> None:
@@ -207,8 +306,10 @@ async def get_vuln_assets(vuln_id: str, db: AsyncSession = Depends(get_db), _: U
         .outerjoin(Unit, Unit.id == Asset.unit_id)
         .where(Asset.id.in_(vuln.asset_ids))
     )
-    assets = [
-        {
+    assets = []
+    for asset, unit in assets_result.all():
+        source = _vuln_source_for_asset(vuln, asset)
+        assets.append({
             "id": asset.id,
             "name": asset.name,
             "ip": asset.ip,
@@ -217,7 +318,6 @@ async def get_vuln_assets(vuln_id: str, db: AsyncSession = Depends(get_db), _: U
             "unit_name": unit.name if unit else "",
             "ports": asset.ports,
             "services": asset.services,
-        }
-        for asset, unit in assets_result.all()
-    ]
+            **source,
+        })
     return {"vuln_id": vuln_id, "assets": assets, "total": len(assets)}

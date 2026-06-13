@@ -6,6 +6,14 @@ import { useSearchParams } from 'react-router-dom';
 import apiClient from '@/api/client';
 import type { Vulnerability, Asset, Unit } from '@/types';
 
+type VulnerabilityAsset = Asset & {
+  unit_name?: string;
+  source_fields?: string[];
+  source_summary?: string;
+  source_record_count?: number;
+  source_time?: string | null;
+};
+
 const VULN_STATUSES = ['待确认', '待整改', '整改中', '待复测', '已修复', '误报', '接受风险'];
 const statusColors: Record<string, string> = {
   待确认: 'orange',
@@ -89,7 +97,7 @@ export default function Vulnerabilities() {
   });
 
   // Fetch affected assets for expanded row
-  const { data: expandedAssets } = useQuery({
+  const { data: expandedAssets } = useQuery<VulnerabilityAsset[]>({
     queryKey: ['vuln-assets', expandedId],
     queryFn: async () => {
       if (!expandedId) return [];
@@ -233,13 +241,22 @@ export default function Vulnerabilities() {
                   <p style={{ marginBottom: 8, color: '#5f6368' }}>处置备注：{record.status_note || '暂无'}</p>
                   <p style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>受影响资产：</p>
                   <Space wrap>
-                    {expandedAssets?.map((a: Asset & { unit_id?: string; unit_name?: string }) => (
+                    {expandedAssets?.map((a) => (
                       <Tag key={a.id} color="blue" style={{ cursor: 'pointer' }}
                         onClick={() => window.open(`/assets/${a.id}`, '_self')}>
                         {a.unit_name ? `${a.unit_name} / ` : ''}{a.name} ({a.ip})
                       </Tag>
                     ))}
                     {(!expandedAssets || expandedAssets.length === 0) && <span style={{ color: '#8c8c8c' }}>无关联资产</span>}
+                  </Space>
+                  <p style={{ fontWeight: 600, margin: '12px 0 4px', fontSize: 12 }}>来源追踪：</p>
+                  <Space wrap>
+                    {expandedAssets?.map((a) => (
+                      <Tag key={`${a.id}-source`} color="geekblue">
+                        {a.ip} / {a.source_summary || '关联资产'} / 原始记录 {a.source_record_count || 0} 条 / {a.source_time ? formatTime(a.source_time) : '时间未知'}
+                      </Tag>
+                    ))}
+                    {(!expandedAssets || expandedAssets.length === 0) && <span style={{ color: '#8c8c8c' }}>暂无来源信息</span>}
                   </Space>
                 </div>
               );
