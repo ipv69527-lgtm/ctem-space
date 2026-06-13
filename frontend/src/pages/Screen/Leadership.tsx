@@ -8,6 +8,8 @@ import {
   CloudSyncOutlined,
   DesktopOutlined,
   FireOutlined,
+  FullscreenExitOutlined,
+  FullscreenOutlined,
   FundViewOutlined,
   ReloadOutlined,
   SafetyOutlined,
@@ -209,12 +211,14 @@ function RankingList({ rows, unit = '' }: { rows: { name: string; count: number;
 export default function LeadershipScreen() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const cockpitRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
   const trendRef = useRef<HTMLDivElement>(null);
   const unitRef = useRef<HTMLDivElement>(null);
   const funnelRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(new Date());
   const [currentRegion, setCurrentRegion] = useState<MapRegion>(ANHUI_REGION);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const { data: stats } = useQuery<DashboardData>({
     queryKey: ['dashboard-stats'],
@@ -303,10 +307,38 @@ export default function LeadershipScreen() {
       parent: ANHUI_REGION,
     });
   };
+  const resizeCharts = () => window.setTimeout(() => window.dispatchEvent(new Event('resize')), 120);
+  const toggleFullscreen = async () => {
+    const panel = cockpitRef.current;
+    if (!panel) return;
+    if (isFullscreen) {
+      setIsFullscreen(false);
+      if (document.fullscreenElement === panel) await document.exitFullscreen();
+      resizeCharts();
+      return;
+    }
+    setIsFullscreen(true);
+    try {
+      await panel.requestFullscreen();
+    } catch {
+      // Browser fullscreen can be blocked; fixed-position expansion remains available.
+    }
+    resizeCharts();
+  };
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (document.fullscreenElement === cockpitRef.current) setIsFullscreen(true);
+      if (!document.fullscreenElement) setIsFullscreen(false);
+      resizeCharts();
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
 
   useEffect(() => {
@@ -487,12 +519,18 @@ export default function LeadershipScreen() {
   }, [vulns]);
 
   return (
-    <div style={{
-      minHeight: 'calc(100vh - 100px)',
-      margin: -24,
+    <div ref={cockpitRef} style={{
+      minHeight: isFullscreen ? '100vh' : 'calc(100vh - 100px)',
+      margin: isFullscreen ? 0 : -24,
       padding: 20,
       color: '#dcecff',
       background: 'radial-gradient(circle at 50% 0%, rgba(25,118,210,.22), transparent 34%), linear-gradient(135deg, #061120 0%, #071a31 44%, #050b16 100%)',
+      position: isFullscreen ? 'fixed' : 'relative',
+      inset: isFullscreen ? 0 : undefined,
+      zIndex: isFullscreen ? 1000 : undefined,
+      width: isFullscreen ? '100vw' : undefined,
+      height: isFullscreen ? '100vh' : undefined,
+      overflow: isFullscreen ? 'auto' : undefined,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space size={12}>
@@ -505,6 +543,9 @@ export default function LeadershipScreen() {
         <Space>
           <Typography.Text style={{ color: '#9fc7e8' }}>更新时间：{now.toLocaleString('zh-CN')}</Typography.Text>
           <Button ghost icon={<ReloadOutlined />} onClick={refreshAll}>刷新</Button>
+          <Button ghost icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={toggleFullscreen}>
+            {isFullscreen ? '退出全屏' : '全屏'}
+          </Button>
           <Button ghost onClick={() => navigate('/screen')}>区域作战指挥图</Button>
         </Space>
       </div>
