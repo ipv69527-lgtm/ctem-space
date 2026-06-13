@@ -401,7 +401,7 @@ export default function LeadershipScreen() {
         <Metric label="修复闭环率" value={remediationRate} suffix="%" color="#34c759" icon={<SafetyOutlined />} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '300px minmax(500px, 1fr) 330px', gridTemplateRows: 'minmax(510px, 1fr) 230px', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(360px, 1fr) 280px', gridTemplateRows: 'minmax(510px, 1fr) 230px', gap: 12 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
           <div style={panelStyle}>
             <div style={panelTitleStyle}>单位风险排行 <Tag color="red">Top</Tag></div>
