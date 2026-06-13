@@ -4,7 +4,7 @@ CTEM Platform 是持续威胁暴露管理平台，面向资产接入、单位管
 
 ## 文档
 
-- [安装手册](docs/installation.md)
+- [部署手册](docs/installation.md)
 - [功能介绍](docs/features.md)
 - [运维手册](docs/operations.md)
 
