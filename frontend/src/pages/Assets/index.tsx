@@ -1,4 +1,4 @@
-import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Popover, Checkbox, Tooltip, Modal, Form, message, DatePicker } from 'antd';
+import { Alert, Typography, Table, Spin, Tag, Input, Select, Space, Button, Popover, Checkbox, Tooltip, Modal, Form, message, DatePicker } from 'antd';
 import { ApartmentOutlined, CloudDownloadOutlined, DesktopOutlined, EditOutlined, FolderOpenOutlined, ReloadOutlined, SaveOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -18,6 +18,38 @@ const QUALITY_ISSUE_OPTIONS = [
   { value: 'missing_manufacturer', label: '缺厂商/品牌/型号' },
   { value: 'missing_raw', label: '缺原始数据' },
 ];
+const QUALITY_ISSUE_META: Record<string, { label: string; description: string; action: string }> = {
+  missing_unit: {
+    label: '未归属资产',
+    description: '这些资产没有关联单位，可勾选后批量归属，或进入资产详情逐条修正。',
+    action: '勾选资产后批量归属',
+  },
+  missing_ports: {
+    label: '缺端口资产',
+    description: '这些资产缺少开放端口信息，可编辑资产补录，或调整 RaySpace 查询条件后重新同步。',
+    action: '编辑资产补端口',
+  },
+  missing_location: {
+    label: '缺位置资产',
+    description: '这些资产缺少区域位置，会影响区域统计和地图展示，可编辑资产补充位置。',
+    action: '编辑资产补位置',
+  },
+  missing_coordinates: {
+    label: '缺经纬度资产',
+    description: '这些资产无法在区域态势地图上落点，可编辑资产或修正 RaySpace 经纬度字段映射。',
+    action: '补充经纬度来源',
+  },
+  missing_manufacturer: {
+    label: '缺厂商/品牌/型号资产',
+    description: '这些资产缺少厂商画像字段，可核对 application_info 或人工修正资产画像。',
+    action: '补充厂商画像',
+  },
+  missing_raw: {
+    label: '缺原始数据资产',
+    description: '这些资产缺少 RaySpace 原始记录，建议检查同步任务和接口返回。',
+    action: '查看同步任务',
+  },
+};
 
 function firstText(...values: unknown[]) {
   for (const value of values) {
@@ -214,6 +246,7 @@ export default function Assets() {
 
   const unitNameById = new Map((units || []).map(unit => [unit.id, unit.name]));
   const hasFilters = Boolean(q || unitId || type || risk || port || service || location || hasVulns || qualityIssue);
+  const activeQualityIssue = qualityIssue ? QUALITY_ISSUE_META[qualityIssue] : null;
   const unitOptions = [
     { value: '__unassigned', label: '未归属' },
     ...(units || []).map(unit => ({ value: unit.id, label: unit.name })),
@@ -404,6 +437,37 @@ export default function Assets() {
   return (
     <>
       <Typography.Title level={3} style={{ marginBottom: 24 }}><DesktopOutlined style={{ color: '#13c2c2', marginRight: 8 }} /> 资产管理</Typography.Title>
+      {activeQualityIssue && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`${activeQualityIssue.label}：${assets?.length || 0} 个`}
+          description={
+            <Space direction="vertical" size={8}>
+              <Typography.Text>{activeQualityIssue.description}</Typography.Text>
+              <Space wrap>
+                {canEdit && qualityIssue === 'missing_unit' && (
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<ApartmentOutlined />}
+                    disabled={!selectedAssetIds.length}
+                    onClick={() => setBatchUnitOpen(true)}
+                  >
+                    批量归属{selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ''}
+                  </Button>
+                )}
+                {qualityIssue === 'missing_raw' && (
+                  <Button size="small" onClick={() => navigate('/dataops')}>查看同步任务</Button>
+                )}
+                <Button size="small" onClick={() => navigate('/dataops')}>返回数据质量页</Button>
+                <Button size="small" onClick={() => refetch()}>重新检查</Button>
+              </Space>
+            </Space>
+          }
+        />
+      )}
       <Space style={{ marginBottom: 16, flexWrap: 'wrap' }}>
         <Input prefix={<SearchOutlined />} placeholder="IP/名称/端口/服务..." value={q} onChange={e => setQ(e.target.value)}
           style={{ width: 240, borderRadius: 10 }} allowClear />
@@ -431,6 +495,7 @@ export default function Assets() {
             批量归属{selectedAssetIds.length ? `（${selectedAssetIds.length}）` : ''}
           </Button>
         )}
+        {activeQualityIssue && <Tag color="orange">{activeQualityIssue.action}</Tag>}
         <Button disabled={!hasFilters} onClick={resetFilters}>重置</Button>
         <Popover content={columnConfig} trigger="click" placement="bottomRight">
           <Tooltip title="列配置">
