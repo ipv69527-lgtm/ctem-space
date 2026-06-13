@@ -139,6 +139,12 @@ function featureContainsPoint(feature: any, point: [number, number]) {
   return false;
 }
 
+function findFeatureByCoordinate(geoJSON: any, longitude: number, latitude: number) {
+  if (!geoJSON?.features || !Number.isFinite(longitude) || !Number.isFinite(latitude)) return null;
+  const point: [number, number] = [longitude, latitude];
+  return geoJSON.features.find((feature: any) => featureContainsPoint(feature, point)) || null;
+}
+
 function areaColor(score: number, index: number) {
   if (score >= 60) return '#7f1d1d';
   if (score >= 30) return '#b45309';
@@ -397,8 +403,14 @@ export default function LeadershipScreen() {
       chart.off('click');
       chart.on('click', (params: any) => {
         const data = params.data || {};
-        const name = params.name || data.name || data.properties?.name;
-        const adcode = Number(data.adcode || data.properties?.adcode);
+        let name = params.name || data.name || data.properties?.name;
+        let adcode = Number(data.adcode || data.properties?.adcode);
+        const asset = data.asset;
+        if (currentRegion.level === 'city' && !Number.isFinite(adcode) && asset) {
+          const feature = findFeatureByCoordinate(geoJSON, Number(asset.longitude), Number(asset.latitude));
+          name = feature?.properties?.name || name;
+          adcode = Number(feature?.properties?.adcode);
+        }
         if (currentRegion.level === 'city' && Number.isFinite(adcode)) drillToCountyLevel(name, adcode);
       });
     };
