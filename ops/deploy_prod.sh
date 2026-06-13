@@ -22,7 +22,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$PACKAGE" \
   --exclude '._*' \
   backend frontend ops docs docker-compose.prod.yml README.md .env.example .dockerignore
 
-remote_package="/home/kali/$(basename "$PACKAGE")"
+remote_package="${REMOTE_PACKAGE:-/tmp/$(basename "$PACKAGE")}"
 
 scp -o StrictHostKeyChecking=no "$PACKAGE" "$REMOTE_HOST:$remote_package"
 
