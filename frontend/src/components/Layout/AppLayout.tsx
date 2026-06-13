@@ -12,6 +12,7 @@ const { Sider, Header, Content } = Layout;
 
 const iconColors: Record<string, string> = {
   '/dashboard': '#1677ff', '/screen': '#13c2c2', '/units': '#2f54eb',
+  '/screen/leadership': '#faad14',
   '/assets': '#13c2c2', '/dataops': '#1677ff', '/vulnerabilities': '#f5222d', '/reports': '#fa8c16',
   '/templates': '#722ed1', '/users': '#52c41a', '/audit': '#1677ff', '/settings': '#8c8c8c',
 };
@@ -22,7 +23,15 @@ function coloredIcon(Icon: any, key: string) {
 
 const menuItems: MenuProps['items'] = [
   { key: '/dashboard', icon: coloredIcon(DashboardOutlined, '/dashboard'), label: '全局态势' },
-  { key: '/screen', icon: coloredIcon(FundViewOutlined, '/screen'), label: '大屏展示' },
+  {
+    key: '/screen-group',
+    icon: coloredIcon(FundViewOutlined, '/screen'),
+    label: '大屏展示',
+    children: [
+      { key: '/screen/leadership', icon: coloredIcon(FundViewOutlined, '/screen/leadership'), label: '领导驾驶舱' },
+      { key: '/screen', icon: coloredIcon(FundViewOutlined, '/screen'), label: '区域作战指挥图' },
+    ],
+  },
   { key: '/units', icon: coloredIcon(BankOutlined, '/units'), label: '单位管理' },
   { key: '/assets', icon: coloredIcon(DesktopOutlined, '/assets'), label: '资产管理' },
   { key: '/dataops', icon: coloredIcon(DatabaseOutlined, '/dataops'), label: '数据接入' },
@@ -46,7 +55,8 @@ export default function AppLayout() {
   const { user, logout } = useAuthStore();
   const [collapsed, setCollapsed] = useState(false);
   const { token: themeToken } = theme.useToken();
-  const selectedKey = '/' + location.pathname.split('/')[1];
+  const selectedKey = location.pathname.startsWith('/screen/leadership') ? '/screen/leadership' : '/' + location.pathname.split('/')[1];
+  const openKeys = location.pathname.startsWith('/screen') ? ['/screen-group'] : undefined;
 
   const userMenu: MenuProps['items'] = [
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', onClick: logout },
@@ -60,7 +70,7 @@ export default function AppLayout() {
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: themeToken.colorPrimary, display: 'inline-block' }} />
           {!collapsed && 'CTEM 平台'}
         </div>
-        <Menu mode="inline" selectedKeys={[selectedKey]} items={user ? roleFilter(user.role) : menuItems}
+        <Menu mode="inline" selectedKeys={[selectedKey]} defaultOpenKeys={openKeys} items={user ? roleFilter(user.role) : menuItems}
           onClick={({ key }) => navigate(key)} style={{ background: 'transparent', border: 'none' }} />
       </Sider>
       <Layout>

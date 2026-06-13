@@ -9,6 +9,7 @@ import apiClient from '@/api/client';
 const Login = lazy(() => import('@/pages/Login'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
 const Screen = lazy(() => import('@/pages/Screen'));
+const LeadershipScreen = lazy(() => import('@/pages/Screen/Leadership'));
 const Units = lazy(() => import('@/pages/Units'));
 const UnitDetail = lazy(() => import('@/pages/Units/UnitDetail'));
 const Assets = lazy(() => import('@/pages/Assets'));
@@ -70,6 +71,7 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="screen" element={<Screen />} />
+          <Route path="screen/leadership" element={<LeadershipScreen />} />
           <Route path="units" element={<Units />} />
           <Route path="units/:unitId" element={<UnitDetail />} />
           <Route path="assets" element={<Assets />} />
