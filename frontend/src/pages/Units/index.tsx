@@ -6,6 +6,15 @@ import { useNavigate } from 'react-router-dom';
 import apiClient from '@/api/client';
 import type { SyncSchedule, Unit } from '@/types';
 
+interface UnitIpRangeSuggestion {
+  unit_id: string;
+  unit_name: string;
+  asset_count: number;
+  existing_count: number;
+  new_count: number;
+  ip_ranges: string[];
+}
+
 export default function Units() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -46,6 +55,27 @@ export default function Units() {
       message.success(editingUnit ? '单位更新成功' : '单位创建成功');
     },
     onError: (err: any) => message.error(err.response?.data?.detail || (editingUnit ? '更新失败' : '创建失败')),
+  });
+
+  const ipRangeSuggestionMutation = useMutation({
+    mutationFn: async (unitId: string) => {
+      const { data } = await apiClient.get<UnitIpRangeSuggestion>(`/units/${unitId}/ip-ranges/suggestions`);
+      return data;
+    },
+    onSuccess: (data) => {
+      if (!data.ip_ranges.length) {
+        message.warning('该单位当前没有可用于补全的已归属资产 IP');
+        return;
+      }
+      const current = String(form.getFieldValue('ip_ranges') || '')
+        .split(/[\n,，\s]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+      const merged = Array.from(new Set([...current, ...data.ip_ranges]));
+      form.setFieldValue('ip_ranges', merged.join('\n'));
+      message.success(`已补全 ${data.new_count} 个新 IP，保存后生效`);
+    },
+    onError: (err: any) => message.error(err.response?.data?.detail || 'IP 范围补全失败'),
   });
 
   const openCreateModal = () => {
@@ -145,7 +175,26 @@ export default function Units() {
           <Form.Item name="contact" label="联系人"><Input placeholder="联系人姓名" /></Form.Item>
           <Form.Item name="email" label="联系邮箱"><Input placeholder="email@example.com" /></Form.Item>
           <Form.Item name="status" label="状态"><Select options={[{ value: 'active', label: '活跃' }, { value: 'inactive', label: '停用' }]} /></Form.Item>
-          <Form.Item name="ip_ranges" label="IP 范围（每行一个）"><Input.TextArea rows={3} placeholder="如：10.10.0.0/16&#10;36.7.79.25" /></Form.Item>
+          <Form.Item
+            name="ip_ranges"
+            label={(
+              <Space size={8}>
+                <span>IP 范围（每行一个）</span>
+                {editingUnit && (
+                  <Button
+                    size="small"
+                    htmlType="button"
+                    loading={ipRangeSuggestionMutation.isPending}
+                    onClick={() => ipRangeSuggestionMutation.mutate(editingUnit.id)}
+                  >
+                    根据资产补全
+                  </Button>
+                )}
+              </Space>
+            )}
+          >
+            <Input.TextArea rows={3} placeholder="如：10.10.0.0/16&#10;36.7.79.25" />
+          </Form.Item>
           <Form.Item name="aliases" label="单位别名（每行一个）">
             <Input.TextArea rows={3} placeholder="用于自动归属精确匹配，如简称、历史名称" />
           </Form.Item>

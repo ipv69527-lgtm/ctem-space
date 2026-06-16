@@ -1,7 +1,10 @@
+import ipaddress
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.database import get_db
+from app.models.asset import Asset
 from app.models.unit import Unit, UnitStatus
 from app.schemas.unit import UnitCreate, UnitRead
 from app.services.auth import require_operator, require_reader
@@ -39,6 +42,21 @@ async def _ensure_unique_code(db: AsyncSession, code: str, exclude_id: str = "")
         raise HTTPException(status_code=409, detail="单位编码已存在")
 
 
+def _normal_ip(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return str(ipaddress.ip_address(text))
+    except ValueError:
+        return ""
+
+
+def _ip_sort_key(value: str) -> tuple[int, int]:
+    address = ipaddress.ip_address(value)
+    return (address.version, int(address))
+
+
 @router.get("/", response_model=list[UnitRead])
 async def list_units(
     q: str = Query(""),
@@ -63,6 +81,33 @@ async def get_unit(unit_id: str, db: AsyncSession = Depends(get_db), _: User = D
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found")
     return UnitRead.model_validate(unit)
+
+
+@router.get("/{unit_id}/ip-ranges/suggestions")
+async def suggest_unit_ip_ranges(
+    unit_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_reader),
+):
+    unit_result = await db.execute(select(Unit).where(Unit.id == unit_id))
+    unit = unit_result.scalar_one_or_none()
+    if not unit:
+        raise HTTPException(status_code=404, detail="Unit not found")
+
+    asset_rows = await db.execute(select(Asset.ip).where(Asset.unit_id == unit_id))
+    ips = sorted(
+        {ip for ip in (_normal_ip(row[0]) for row in asset_rows.all()) if ip},
+        key=_ip_sort_key,
+    )
+    existing = set(unit.ip_ranges or [])
+    return {
+        "unit_id": unit.id,
+        "unit_name": unit.name,
+        "asset_count": len(ips),
+        "existing_count": len(existing),
+        "new_count": len([ip for ip in ips if ip not in existing]),
+        "ip_ranges": ips,
+    }
 
 
 @router.post("/", response_model=UnitRead, status_code=201)
