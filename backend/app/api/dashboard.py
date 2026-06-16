@@ -5,6 +5,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+from sqlalchemy.orm import defer
 
 from app.database import get_db
 from app.models.unit import Unit
@@ -13,21 +14,6 @@ from app.models.vulnerability import Vulnerability
 from app.services.auth import require_reader
 
 router = APIRouter()
-
-
-def _first_raw_number(raw_data, keys: list[str]):
-    if not isinstance(raw_data, list):
-        return None
-    for item in raw_data:
-        if not isinstance(item, dict):
-            continue
-        for key in keys:
-            try:
-                value = float(item.get(key))
-            except (TypeError, ValueError):
-                continue
-            return value
-    return None
 
 
 @router.get("/stats")
@@ -108,14 +94,17 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db), _=Depends(requ
 
 @router.get("/asset-locations")
 async def get_asset_locations(db: AsyncSession = Depends(get_db), _=Depends(require_reader)):
-    assets = list((await db.execute(select(Asset))).scalars().all())
+    assets = list(
+        (
+            await db.execute(
+                select(Asset).where(Asset.longitude.is_not(None), Asset.latitude.is_not(None))
+                .options(defer(Asset.raw_data))
+            )
+        ).scalars().all()
+    )
     units = {unit.id: unit.name for unit in (await db.execute(select(Unit))).scalars().all()}
     locations = []
     for asset in assets:
-        longitude = _first_raw_number(asset.raw_data, ["longitude", "lng"])
-        latitude = _first_raw_number(asset.raw_data, ["latitude", "lat"])
-        if longitude is None or latitude is None:
-            continue
         locations.append({
             "id": asset.id,
             "name": asset.name,
@@ -126,7 +115,7 @@ async def get_asset_locations(db: AsyncSession = Depends(get_db), _=Depends(requ
             "ports": asset.ports,
             "services": asset.services,
             "vuln_count": len(asset.vuln_ids or []),
-            "longitude": longitude,
-            "latitude": latitude,
+            "longitude": asset.longitude,
+            "latitude": asset.latitude,
         })
     return locations

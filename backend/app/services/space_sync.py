@@ -23,7 +23,41 @@ from app.services.unit_ip_ranges import complete_unit_ip_ranges
 
 ASSET_PATH_FALLBACKS = ("api/asset/select/query", "api/v1/assets", "api/assets", "assets")
 VULNERABILITY_PATH_FALLBACKS = ("api/v1/vulnerabilities", "api/vulnerabilities", "vulnerabilities")
-TRACKED_ASSET_FIELDS = ("name", "mac", "type", "os", "risk", "ports", "services", "location", "isp")
+TRACKED_ASSET_FIELDS = (
+    "name",
+    "mac",
+    "type",
+    "os",
+    "risk",
+    "ports",
+    "services",
+    "location",
+    "isp",
+    "country",
+    "province",
+    "city",
+    "county",
+    "longitude",
+    "latitude",
+    "manufacturer",
+    "brand",
+    "model",
+    "product",
+    "device",
+    "device_type",
+)
+ASSET_PROFILE_TEXT_FIELDS = (
+    "country",
+    "province",
+    "city",
+    "county",
+    "manufacturer",
+    "brand",
+    "model",
+    "product",
+    "device",
+    "device_type",
+)
 CVE_PATTERN = re.compile(r"^CVE-\d{4}-\d{4,}$", re.IGNORECASE)
 CVE_IN_TEXT_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
 DOMAIN_LIKE_PATTERN = re.compile(r"^\*?\.?[a-z0-9-]+(\.[a-z0-9-]+)+$", re.IGNORECASE)
@@ -67,6 +101,17 @@ def _first_text(*values: Any, default: str = "") -> str:
         if text:
             return text
     return default
+
+
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        try:
+            if value in (None, ""):
+                continue
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _risk(value: Any) -> str:
@@ -444,6 +489,37 @@ def _asset_services(raw: dict[str, Any]) -> str:
     return _merge_tokens(services, raw.get("service_list"))
 
 
+def _raw_app_info_value(raw: dict[str, Any], *keys: str) -> str:
+    app_info = raw.get("application_info")
+    if not isinstance(app_info, list):
+        return ""
+    for item in app_info:
+        if not isinstance(item, dict):
+            continue
+        for key in keys:
+            text = _non_empty_text(item.get(key))
+            if text:
+                return text
+    return ""
+
+
+def _asset_profile(raw: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "country": _first_text(raw.get("country")),
+        "province": _first_text(raw.get("province")),
+        "city": _first_text(raw.get("city")),
+        "county": _first_text(raw.get("county"), raw.get("district")),
+        "longitude": _first_float(raw.get("longitude"), raw.get("lng")),
+        "latitude": _first_float(raw.get("latitude"), raw.get("lat")),
+        "manufacturer": _first_text(raw.get("manufacturer"), _raw_app_info_value(raw, "manufacturer", "manufacturer_short")),
+        "brand": _first_text(raw.get("brand"), _raw_app_info_value(raw, "brand")),
+        "model": _first_text(raw.get("model"), _raw_app_info_value(raw, "model")),
+        "product": _first_text(raw.get("product"), raw.get("app"), _raw_app_info_value(raw, "name", "product")),
+        "device": _first_text(raw.get("device")),
+        "device_type": _first_text(raw.get("device_type"), raw.get("asset_type"), raw.get("category_sub")),
+    }
+
+
 def _raw_key(raw: dict[str, Any]) -> str:
     return "|".join(
         _text(raw.get(key))
@@ -480,6 +556,16 @@ def _set_if_present(asset: Asset, field: str, value: Any, default: str = "") -> 
         setattr(asset, field, text)
     elif default and not _non_empty_text(getattr(asset, field, "")):
         setattr(asset, field, default)
+
+
+def _set_asset_profile(asset: Asset, raw: dict[str, Any]) -> None:
+    profile = _asset_profile(raw)
+    for field in ASSET_PROFILE_TEXT_FIELDS:
+        _set_if_present(asset, field, profile.get(field))
+    if profile.get("longitude") is not None:
+        asset.longitude = profile["longitude"]
+    if profile.get("latitude") is not None:
+        asset.latitude = profile["latitude"]
 
 
 def _raw_asset_name(raw: dict[str, Any], fallback: str) -> str:
@@ -1072,6 +1158,7 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
                 asset.services = _merge_tokens(asset.services, _asset_services(raw))
                 _set_if_present(asset, "location", _raw_asset_location(raw))
                 _set_if_present(asset, "isp", raw.get("isp"))
+                _set_asset_profile(asset, raw)
                 asset.raw_data = _merge_raw_data(asset.raw_data, raw)
                 asset.last_seen = datetime.utcnow()
                 await db.flush()

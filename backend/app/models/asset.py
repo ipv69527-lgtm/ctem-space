@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Text, DateTime, ARRAY, ForeignKey
+from sqlalchemy import Float, String, Text, DateTime, ARRAY, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
@@ -24,6 +24,18 @@ class Asset(Base):
     services: Mapped[str] = mapped_column(Text, default="")
     location: Mapped[str] = mapped_column(String(256), default="")
     isp: Mapped[str] = mapped_column(String(64), default="")
+    country: Mapped[str] = mapped_column(String(128), default="")
+    province: Mapped[str] = mapped_column(String(128), default="")
+    city: Mapped[str] = mapped_column(String(128), default="")
+    county: Mapped[str] = mapped_column(String(128), default="")
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    manufacturer: Mapped[str] = mapped_column(String(128), default="")
+    brand: Mapped[str] = mapped_column(String(128), default="")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    product: Mapped[str] = mapped_column(String(256), default="")
+    device: Mapped[str] = mapped_column(String(256), default="")
+    device_type: Mapped[str] = mapped_column(String(128), default="")
     raw_data: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

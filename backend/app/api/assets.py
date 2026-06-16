@@ -15,7 +15,6 @@ router = APIRouter()
 
 ASSET_RISKS = {"严重", "高危", "中危", "低危"}
 ASSET_EDIT_FIELDS = ("name", "ip", "mac", "type", "os", "risk", "unit_id", "ports", "services", "location", "isp")
-MANUFACTURER_KEYS = ("manufacturer", "manufacturer_short", "brand", "model")
 
 
 def _asset_read(asset: Asset, include_raw: bool = True) -> AssetRead:
@@ -35,6 +34,18 @@ def _asset_read(asset: Asset, include_raw: bool = True) -> AssetRead:
         services=asset.services,
         location=asset.location,
         isp=asset.isp,
+        country=asset.country,
+        province=asset.province,
+        city=asset.city,
+        county=asset.county,
+        longitude=asset.longitude,
+        latitude=asset.latitude,
+        manufacturer=asset.manufacturer,
+        brand=asset.brand,
+        model=asset.model,
+        product=asset.product,
+        device=asset.device,
+        device_type=asset.device_type,
         raw_data=[],
         last_seen=asset.last_seen,
         created_at=asset.created_at,
@@ -64,20 +75,6 @@ def _raw_items(asset: Asset) -> list[dict]:
     return [item for item in (asset.raw_data or []) if isinstance(item, dict)]
 
 
-def _raw_value(asset: Asset, keys: tuple[str, ...]) -> str:
-    for item in _raw_items(asset):
-        for key in keys:
-            value = item.get(key)
-            if value not in (None, ""):
-                return str(value)
-            app_info = item.get("application_info")
-            if isinstance(app_info, list):
-                for app in app_info:
-                    if isinstance(app, dict) and app.get(key) not in (None, ""):
-                        return str(app[key])
-    return ""
-
-
 def _quality_sample(asset: Asset, issue: str) -> dict[str, str | None]:
     return {"id": asset.id, "ip": asset.ip, "name": asset.name, "unit_id": asset.unit_id, "issue": issue}
 
@@ -90,9 +87,9 @@ def _asset_matches_quality_issue(asset: Asset, issue: str) -> bool:
     if issue == "missing_location":
         return not asset.location
     if issue == "missing_coordinates":
-        return not (_raw_value(asset, ("longitude", "lng")) and _raw_value(asset, ("latitude", "lat")))
+        return asset.longitude is None or asset.latitude is None
     if issue == "missing_manufacturer":
-        return not _raw_value(asset, MANUFACTURER_KEYS)
+        return not (asset.manufacturer or asset.brand or asset.model)
     if issue == "missing_raw":
         return not _raw_items(asset)
     return True
@@ -156,26 +153,14 @@ async def list_assets(
         stmt = stmt.where(Asset.location == "")
     elif quality_issue == "missing_raw":
         stmt = stmt.where(func.jsonb_array_length(Asset.raw_data) == 0)
-    elif quality_issue and quality_issue not in {"missing_coordinates", "missing_manufacturer"}:
+    elif quality_issue == "missing_coordinates":
+        stmt = stmt.where(or_(Asset.longitude.is_(None), Asset.latitude.is_(None)))
+    elif quality_issue == "missing_manufacturer":
+        stmt = stmt.where(Asset.manufacturer == "", Asset.brand == "", Asset.model == "")
+    elif quality_issue:
         raise HTTPException(status_code=400, detail="不支持的数据质量筛选项")
-    needs_raw_data = include_raw or quality_issue in {"missing_coordinates", "missing_manufacturer"}
-    if not needs_raw_data:
+    if not include_raw:
         stmt = stmt.options(defer(Asset.raw_data))
-    if quality_issue in {"missing_coordinates", "missing_manufacturer"}:
-        stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
-        result = await db.execute(stmt)
-        assets = list(result.scalars().all())
-        assets = [asset for asset in assets if _asset_matches_quality_issue(asset, quality_issue)]
-        if page:
-            start = (page - 1) * page_size
-            end = start + page_size
-            return {
-                "items": [_asset_read(a, include_raw) for a in assets[start:end]],
-                "total": len(assets),
-                "page": page,
-                "page_size": page_size,
-            }
-        return [_asset_read(a, include_raw) for a in assets]
 
     stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
     total = None
@@ -243,9 +228,9 @@ async def asset_quality_report(
             missing_ports.append(asset)
         if not asset.location:
             missing_location.append(asset)
-        if not (_raw_value(asset, ("longitude", "lng")) and _raw_value(asset, ("latitude", "lat"))):
+        if asset.longitude is None or asset.latitude is None:
             missing_coordinates.append(asset)
-        if not _raw_value(asset, MANUFACTURER_KEYS):
+        if not (asset.manufacturer or asset.brand or asset.model):
             missing_manufacturer.append(asset)
         if not raw_items:
             missing_raw.append(asset)

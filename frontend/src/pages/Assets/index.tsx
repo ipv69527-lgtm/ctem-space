@@ -10,20 +10,7 @@ import { useAuthStore } from '@/stores/authStore';
 
 const ASSET_VISIBLE_COLUMNS_KEY = 'ctem.asset.visibleColumns';
 const DEFAULT_VISIBLE_COLUMNS = ['name', 'ip', 'unit_name', 'type', 'ports', 'risk', 'location', 'last_seen'];
-const RAW_BACKED_COLUMNS = new Set([
-  'country',
-  'province',
-  'city',
-  'longitude',
-  'latitude',
-  'manufacturer',
-  'brand',
-  'model',
-  'product',
-  'device',
-  'device_type',
-  'raw_count',
-]);
+const RAW_BACKED_COLUMNS = new Set(['raw_count']);
 const QUALITY_ISSUE_OPTIONS = [
   { value: 'missing_unit', label: '未归属' },
   { value: 'missing_ports', label: '缺端口' },
@@ -230,9 +217,7 @@ export default function Assets() {
   }, [q, unitId, type, risk, port, service, location, hasVulns, qualityIssue]);
 
   const includeRaw = Boolean(
-    qualityIssue === 'missing_coordinates'
-      || qualityIssue === 'missing_manufacturer'
-      || visibleColumnKeys.some(key => RAW_BACKED_COLUMNS.has(key))
+    visibleColumnKeys.some(key => RAW_BACKED_COLUMNS.has(key))
   );
 
   const { data: assetsPage, isLoading, refetch } = useQuery<PaginatedResponse<Asset>>({
@@ -423,17 +408,17 @@ export default function Assets() {
     { title: '运营商', dataIndex: 'isp', key: 'isp', render: (v: string) => v || '-' },
     { title: 'MAC', dataIndex: 'mac', key: 'mac', render: (v: string) => v ? <code>{v}</code> : '-' },
     { title: '操作系统', dataIndex: 'os', key: 'os', ellipsis: true, render: (v: string, r: Asset) => v || rawValue(r, ['os_family']) || '-' },
-    { title: '国家', key: 'country', render: (_: unknown, r: Asset) => rawValue(r, ['country']) || '-' },
-    { title: '省份', key: 'province', render: (_: unknown, r: Asset) => rawValue(r, ['province']) || '-' },
-    { title: '城市', key: 'city', render: (_: unknown, r: Asset) => rawValue(r, ['city']) || '-' },
-    { title: '经度', key: 'longitude', render: (_: unknown, r: Asset) => rawValue(r, ['longitude', 'lng']) || '-' },
-    { title: '纬度', key: 'latitude', render: (_: unknown, r: Asset) => rawValue(r, ['latitude', 'lat']) || '-' },
-    { title: '厂商', key: 'manufacturer', ellipsis: true, render: (_: unknown, r: Asset) => appInfoValue(r, ['manufacturer', 'manufacturer_short']) || rawValue(r, ['manufacturer']) || '-' },
-    { title: '品牌', key: 'brand', render: (_: unknown, r: Asset) => appInfoValue(r, ['brand']) || rawValue(r, ['brand']) || '-' },
-    { title: '型号', key: 'model', render: (_: unknown, r: Asset) => appInfoValue(r, ['model']) || rawValue(r, ['model']) || '-' },
-    { title: '应用/产品', key: 'product', ellipsis: true, render: (_: unknown, r: Asset) => appInfoValue(r, ['name']) || rawValue(r, ['product', 'app']) || '-' },
-    { title: '设备', key: 'device', ellipsis: true, render: (_: unknown, r: Asset) => rawValue(r, ['device']) || '-' },
-    { title: '设备类型', key: 'device_type', render: (_: unknown, r: Asset) => rawValue(r, ['device_type']) || '-' },
+    { title: '国家', key: 'country', render: (_: unknown, r: Asset) => r.country || rawValue(r, ['country']) || '-' },
+    { title: '省份', key: 'province', render: (_: unknown, r: Asset) => r.province || rawValue(r, ['province']) || '-' },
+    { title: '城市', key: 'city', render: (_: unknown, r: Asset) => r.city || rawValue(r, ['city']) || '-' },
+    { title: '经度', key: 'longitude', render: (_: unknown, r: Asset) => r.longitude ?? (rawValue(r, ['longitude', 'lng']) || '-') },
+    { title: '纬度', key: 'latitude', render: (_: unknown, r: Asset) => r.latitude ?? (rawValue(r, ['latitude', 'lat']) || '-') },
+    { title: '厂商', key: 'manufacturer', ellipsis: true, render: (_: unknown, r: Asset) => r.manufacturer || appInfoValue(r, ['manufacturer', 'manufacturer_short']) || rawValue(r, ['manufacturer']) || '-' },
+    { title: '品牌', key: 'brand', render: (_: unknown, r: Asset) => r.brand || appInfoValue(r, ['brand']) || rawValue(r, ['brand']) || '-' },
+    { title: '型号', key: 'model', render: (_: unknown, r: Asset) => r.model || appInfoValue(r, ['model']) || rawValue(r, ['model']) || '-' },
+    { title: '应用/产品', key: 'product', ellipsis: true, render: (_: unknown, r: Asset) => r.product || appInfoValue(r, ['name']) || rawValue(r, ['product', 'app']) || '-' },
+    { title: '设备', key: 'device', ellipsis: true, render: (_: unknown, r: Asset) => r.device || rawValue(r, ['device']) || '-' },
+    { title: '设备类型', key: 'device_type', render: (_: unknown, r: Asset) => r.device_type || rawValue(r, ['device_type']) || '-' },
     { title: '漏洞数', key: 'vuln_count', render: (_: unknown, r: Asset) => <span style={{ color: '#1677ff', fontWeight: 600 }}>{r.vuln_ids?.length || 0}</span> },
     { title: '原始记录', key: 'raw_count', render: (_: unknown, r: Asset) => rawItems(r).length },
     { title: '最近发现', dataIndex: 'last_seen', key: 'last_seen', render: (v: string|null) => v ? new Date(v).toLocaleString('zh-CN') : '-' },

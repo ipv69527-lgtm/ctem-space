@@ -50,6 +50,18 @@ class AssetRead(BaseModel):
     services: str
     location: str
     isp: str
+    country: str = ""
+    province: str = ""
+    city: str = ""
+    county: str = ""
+    longitude: Optional[float] = None
+    latitude: Optional[float] = None
+    manufacturer: str = ""
+    brand: str = ""
+    model: str = ""
+    product: str = ""
+    device: str = ""
+    device_type: str = ""
     raw_data: list[dict[str, Any]]
     last_seen: Optional[datetime] = None
     created_at: Optional[datetime] = None

@@ -32,6 +32,18 @@ export interface Asset {
   services: string;
   location: string;
   isp: string;
+  country: string;
+  province: string;
+  city: string;
+  county: string;
+  longitude: number | null;
+  latitude: number | null;
+  manufacturer: string;
+  brand: string;
+  model: string;
+  product: string;
+  device: string;
+  device_type: string;
   raw_data: Record<string, unknown>[];
   last_seen: string | null;
   created_at?: string | null;

@@ -546,7 +546,6 @@ export default function LeadershipScreen() {
           <Button ghost icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} onClick={toggleFullscreen}>
             {isFullscreen ? '退出全屏' : '全屏'}
           </Button>
-          <Button ghost onClick={() => navigate('/screen')}>区域作战指挥图</Button>
         </Space>
       </div>
 
