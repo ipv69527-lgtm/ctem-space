@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import defer
 from app.database import get_db
 from app.models.asset import Asset
 from app.models.asset_change import AssetChange
@@ -15,6 +16,29 @@ router = APIRouter()
 ASSET_RISKS = {"严重", "高危", "中危", "低危"}
 ASSET_EDIT_FIELDS = ("name", "ip", "mac", "type", "os", "risk", "unit_id", "ports", "services", "location", "isp")
 MANUFACTURER_KEYS = ("manufacturer", "manufacturer_short", "brand", "model")
+
+
+def _asset_read(asset: Asset, include_raw: bool = True) -> AssetRead:
+    if include_raw:
+        return AssetRead.model_validate(asset)
+    return AssetRead(
+        id=asset.id,
+        name=asset.name,
+        ip=asset.ip,
+        mac=asset.mac,
+        type=asset.type,
+        os=asset.os,
+        risk=asset.risk,
+        unit_id=asset.unit_id,
+        vuln_ids=asset.vuln_ids or [],
+        ports=asset.ports,
+        services=asset.services,
+        location=asset.location,
+        isp=asset.isp,
+        raw_data=[],
+        last_seen=asset.last_seen,
+        created_at=asset.created_at,
+    )
 
 
 async def _ensure_asset_unit(db: AsyncSession, unit_id: str | None) -> None:
@@ -88,6 +112,7 @@ async def list_assets(
     quality_issue: str = Query(""),
     page: int = Query(0, ge=0),
     page_size: int = Query(50, ge=1, le=500),
+    include_raw: bool = Query(True),
     db: AsyncSession = Depends(get_db), _: User = Depends(require_reader),
 ):
     stmt = select(Asset)
@@ -133,6 +158,9 @@ async def list_assets(
         stmt = stmt.where(func.jsonb_array_length(Asset.raw_data) == 0)
     elif quality_issue and quality_issue not in {"missing_coordinates", "missing_manufacturer"}:
         raise HTTPException(status_code=400, detail="不支持的数据质量筛选项")
+    needs_raw_data = include_raw or quality_issue in {"missing_coordinates", "missing_manufacturer"}
+    if not needs_raw_data:
+        stmt = stmt.options(defer(Asset.raw_data))
     if quality_issue in {"missing_coordinates", "missing_manufacturer"}:
         stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
         result = await db.execute(stmt)
@@ -142,12 +170,12 @@ async def list_assets(
             start = (page - 1) * page_size
             end = start + page_size
             return {
-                "items": [AssetRead.model_validate(a) for a in assets[start:end]],
+                "items": [_asset_read(a, include_raw) for a in assets[start:end]],
                 "total": len(assets),
                 "page": page,
                 "page_size": page_size,
             }
-        return [AssetRead.model_validate(a) for a in assets]
+        return [_asset_read(a, include_raw) for a in assets]
 
     stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
     total = None
@@ -157,7 +185,7 @@ async def list_assets(
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
 
     result = await db.execute(stmt)
-    items = [AssetRead.model_validate(a) for a in result.scalars().all()]
+    items = [_asset_read(a, include_raw) for a in result.scalars().all()]
     if page:
         return {"items": items, "total": total or 0, "page": page, "page_size": page_size}
     return items

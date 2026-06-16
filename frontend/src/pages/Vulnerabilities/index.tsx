@@ -91,7 +91,7 @@ export default function Vulnerabilities() {
   const { data: assetOptionsPage } = useQuery<PaginatedResponse<Asset>>({
     queryKey: ['asset-options'],
     queryFn: async () => {
-      const { data } = await apiClient.get('/assets/?page=1&page_size=500');
+      const { data } = await apiClient.get('/assets/?page=1&page_size=500&include_raw=false');
       return data;
     },
   });

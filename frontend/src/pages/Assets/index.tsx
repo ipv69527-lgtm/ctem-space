@@ -10,6 +10,20 @@ import { useAuthStore } from '@/stores/authStore';
 
 const ASSET_VISIBLE_COLUMNS_KEY = 'ctem.asset.visibleColumns';
 const DEFAULT_VISIBLE_COLUMNS = ['name', 'ip', 'unit_name', 'type', 'ports', 'risk', 'location', 'last_seen'];
+const RAW_BACKED_COLUMNS = new Set([
+  'country',
+  'province',
+  'city',
+  'longitude',
+  'latitude',
+  'manufacturer',
+  'brand',
+  'model',
+  'product',
+  'device',
+  'device_type',
+  'raw_count',
+]);
 const QUALITY_ISSUE_OPTIONS = [
   { value: 'missing_unit', label: '未归属' },
   { value: 'missing_ports', label: '缺端口' },
@@ -215,12 +229,19 @@ export default function Assets() {
     setPage(1);
   }, [q, unitId, type, risk, port, service, location, hasVulns, qualityIssue]);
 
+  const includeRaw = Boolean(
+    qualityIssue === 'missing_coordinates'
+      || qualityIssue === 'missing_manufacturer'
+      || visibleColumnKeys.some(key => RAW_BACKED_COLUMNS.has(key))
+  );
+
   const { data: assetsPage, isLoading, refetch } = useQuery<PaginatedResponse<Asset>>({
-    queryKey: ['assets', q, unitId, type, risk, port, service, location, hasVulns, qualityIssue, page, pageSize],
+    queryKey: ['assets', q, unitId, type, risk, port, service, location, hasVulns, qualityIssue, page, pageSize, includeRaw],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
       params.set('page_size', String(pageSize));
+      params.set('include_raw', includeRaw ? 'true' : 'false');
       if (q) params.set('q', q);
       if (unitId) params.set('unit_id', unitId);
       if (type) params.set('type', type);
