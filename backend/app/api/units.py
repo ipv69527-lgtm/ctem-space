@@ -57,6 +57,29 @@ def _ip_sort_key(value: str) -> tuple[int, int]:
     return (address.version, int(address))
 
 
+def _sorted_asset_ips(values: list[str]) -> list[str]:
+    return sorted({ip for ip in (_normal_ip(value) for value in values) if ip}, key=_ip_sort_key)
+
+
+def _merge_unit_ip_ranges(unit: Unit, asset_ips: list[str]) -> dict:
+    current = _clean_list(unit.ip_ranges or [])
+    suggested = _sorted_asset_ips(asset_ips)
+    added = [ip for ip in suggested if ip not in current]
+    merged = [*current, *added]
+    return {
+        "unit_id": unit.id,
+        "unit_name": unit.name,
+        "asset_count": len(suggested),
+        "existing_count": len(current),
+        "new_count": len(added),
+        "before_count": len(current),
+        "after_count": len(merged),
+        "ip_ranges": suggested,
+        "added_ip_ranges": added,
+        "merged_ip_ranges": merged,
+    }
+
+
 @router.get("/", response_model=list[UnitRead])
 async def list_units(
     q: str = Query(""),
@@ -72,6 +95,59 @@ async def list_units(
     stmt = stmt.order_by(Unit.created_at.desc())
     result = await db.execute(stmt)
     return [UnitRead.model_validate(u) for u in result.scalars().all()]
+
+
+@router.post("/ip-ranges/batch-complete")
+async def batch_complete_unit_ip_ranges(
+    request: Request,
+    dry_run: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_operator),
+):
+    units = list((await db.execute(select(Unit).order_by(Unit.created_at.desc()))).scalars().all())
+    asset_rows = await db.execute(select(Asset.unit_id, Asset.ip).where(Asset.unit_id.is_not(None)))
+    ips_by_unit: dict[str, list[str]] = {}
+    for unit_id, ip in asset_rows.all():
+        if unit_id:
+            ips_by_unit.setdefault(unit_id, []).append(ip)
+
+    rows = [_merge_unit_ip_ranges(unit, ips_by_unit.get(unit.id, [])) for unit in units]
+    changed_rows = [row for row in rows if row["new_count"] > 0]
+    if not dry_run:
+        units_by_id = {unit.id: unit for unit in units}
+        for row in changed_rows:
+            units_by_id[row["unit_id"]].ip_ranges = row["merged_ip_ranges"]
+        await write_audit_log(
+            db,
+            action="unit.ip_ranges.batch_complete",
+            target_type="unit",
+            target_id="*",
+            target_name="批量补全单位IP范围",
+            detail={
+                "unit_count": len(units),
+                "updated_units": len(changed_rows),
+                "added_ip_count": sum(row["new_count"] for row in changed_rows),
+                "items": [
+                    {
+                        "unit_id": row["unit_id"],
+                        "unit_name": row["unit_name"],
+                        "added": row["added_ip_ranges"],
+                    }
+                    for row in changed_rows[:100]
+                ],
+            },
+            user=current_user,
+            request=request,
+        )
+        await db.commit()
+
+    return {
+        "dry_run": dry_run,
+        "unit_count": len(units),
+        "updated_units": len(changed_rows),
+        "added_ip_count": sum(row["new_count"] for row in changed_rows),
+        "items": rows,
+    }
 
 
 @router.get("/{unit_id}", response_model=UnitRead)
@@ -95,18 +171,14 @@ async def suggest_unit_ip_ranges(
         raise HTTPException(status_code=404, detail="Unit not found")
 
     asset_rows = await db.execute(select(Asset.ip).where(Asset.unit_id == unit_id))
-    ips = sorted(
-        {ip for ip in (_normal_ip(row[0]) for row in asset_rows.all()) if ip},
-        key=_ip_sort_key,
-    )
-    existing = set(unit.ip_ranges or [])
+    row = _merge_unit_ip_ranges(unit, [item[0] for item in asset_rows.all()])
     return {
         "unit_id": unit.id,
         "unit_name": unit.name,
-        "asset_count": len(ips),
-        "existing_count": len(existing),
-        "new_count": len([ip for ip in ips if ip not in existing]),
-        "ip_ranges": ips,
+        "asset_count": row["asset_count"],
+        "existing_count": row["existing_count"],
+        "new_count": row["new_count"],
+        "ip_ranges": row["ip_ranges"],
     }
 
 

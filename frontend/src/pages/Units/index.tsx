@@ -15,6 +15,18 @@ interface UnitIpRangeSuggestion {
   ip_ranges: string[];
 }
 
+interface UnitIpRangeBatchResult {
+  unit_count: number;
+  updated_units: number;
+  added_ip_count: number;
+  items: {
+    unit_id: string;
+    unit_name: string;
+    new_count: number;
+    added_ip_ranges: string[];
+  }[];
+}
+
 export default function Units() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -77,6 +89,47 @@ export default function Units() {
     },
     onError: (err: any) => message.error(err.response?.data?.detail || 'IP 范围补全失败'),
   });
+
+  const batchIpRangeMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await apiClient.post<UnitIpRangeBatchResult>('/units/ip-ranges/batch-complete');
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['units'] });
+      const changedItems = data.items.filter(item => item.new_count > 0).slice(0, 8);
+      message.success(`已补全 ${data.updated_units} 个单位，新增 ${data.added_ip_count} 个 IP`);
+      Modal.info({
+        title: '批量补全完成',
+        content: (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Typography.Text>扫描单位 {data.unit_count} 个，更新 {data.updated_units} 个单位，新增 {data.added_ip_count} 个 IP。</Typography.Text>
+            {changedItems.length ? (
+              <div>
+                {changedItems.map(item => (
+                  <div key={item.unit_id} style={{ marginBottom: 4 }}>
+                    <Typography.Text strong>{item.unit_name}</Typography.Text>
+                    <Typography.Text type="secondary">：新增 {item.new_count} 个</Typography.Text>
+                  </div>
+                ))}
+              </div>
+            ) : <Typography.Text type="secondary">当前单位 IP 范围已是最新。</Typography.Text>}
+          </Space>
+        ),
+      });
+    },
+    onError: (err: any) => message.error(err.response?.data?.detail || '批量补全失败'),
+  });
+
+  const confirmBatchIpRangeComplete = () => {
+    Modal.confirm({
+      title: '批量补全现有单位 IP 范围',
+      content: '系统将根据当前已归属资产 IP 合并补全所有单位的 IP 范围，只追加缺失 IP，不删除、不覆盖已有 IP。是否继续？',
+      okText: '开始补全',
+      cancelText: '取消',
+      onOk: () => batchIpRangeMutation.mutate(),
+    });
+  };
 
   const openCreateModal = () => {
     setEditingUnit(null);
@@ -159,7 +212,10 @@ export default function Units() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <Typography.Title level={3} style={{ margin: 0 }}><BankOutlined style={{ color: '#2f54eb', marginRight: 8 }} /> 单位管理</Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建单位</Button>
+        <Space>
+          <Button loading={batchIpRangeMutation.isPending} onClick={confirmBatchIpRangeComplete}>批量补全IP范围</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>新建单位</Button>
+        </Space>
       </div>
       {isLoading ? <Spin size="large" style={{ display: 'block', margin: '10vh auto' }} /> : (
         <Table dataSource={units || []} columns={columns} rowKey="id" style={{ background: '#fff', borderRadius: 14 }}
