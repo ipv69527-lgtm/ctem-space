@@ -24,9 +24,17 @@ COPYFILE_DISABLE=1 tar --no-xattrs -czf "$PACKAGE" \
 
 remote_package="${REMOTE_PACKAGE:-/tmp/$(basename "$PACKAGE")}"
 
-scp -o StrictHostKeyChecking=no "$PACKAGE" "$REMOTE_HOST:$remote_package"
+if [[ -n "${SSHPASS:-}" ]]; then
+  SCP_BIN=(sshpass -e scp)
+  SSH_BIN=(sshpass -e ssh)
+else
+  SCP_BIN=(scp)
+  SSH_BIN=(ssh)
+fi
 
-ssh -o StrictHostKeyChecking=no "$REMOTE_HOST" \
+"${SCP_BIN[@]}" -o StrictHostKeyChecking=no "$PACKAGE" "$REMOTE_HOST:$remote_package"
+
+"${SSH_BIN[@]}" -o StrictHostKeyChecking=no "$REMOTE_HOST" \
   "mkdir -p '$REMOTE_DIR/releases' '$REMOTE_DIR/backups/postgres' && \
    if [ -f '$REMOTE_DIR/docker-compose.prod.yml' ]; then \
      tar -czf '$REMOTE_DIR/releases/predeploy-$(date +%Y%m%d-%H%M%S).tar.gz' \
