@@ -5,7 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect, useState, type Key } from 'react';
 import dayjs from 'dayjs';
 import apiClient from '@/api/client';
-import type { Asset, SyncQueryTemplate, Unit } from '@/types';
+import type { Asset, PaginatedResponse, SyncQueryTemplate, Unit } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 
 const ASSET_VISIBLE_COLUMNS_KEY = 'ctem.asset.visibleColumns';
@@ -186,6 +186,8 @@ export default function Assets() {
   const [location, setLocation] = useState('');
   const [hasVulns, setHasVulns] = useState('');
   const [qualityIssue, setQualityIssue] = useState(searchParams.get('quality_issue') || '');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [visibleColumnKeys, setVisibleColumnKeys] = useState<string[]>(loadVisibleColumns);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [selectedAssetIds, setSelectedAssetIds] = useState<Key[]>([]);
@@ -209,10 +211,16 @@ export default function Assets() {
     setQualityIssue(nextQualityIssue);
   }, [searchParams]);
 
-  const { data: assets, isLoading, refetch } = useQuery<Asset[]>({
-    queryKey: ['assets', q, unitId, type, risk, port, service, location, hasVulns, qualityIssue],
+  useEffect(() => {
+    setPage(1);
+  }, [q, unitId, type, risk, port, service, location, hasVulns, qualityIssue]);
+
+  const { data: assetsPage, isLoading, refetch } = useQuery<PaginatedResponse<Asset>>({
+    queryKey: ['assets', q, unitId, type, risk, port, service, location, hasVulns, qualityIssue, page, pageSize],
     queryFn: async () => {
       const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('page_size', String(pageSize));
       if (q) params.set('q', q);
       if (unitId) params.set('unit_id', unitId);
       if (type) params.set('type', type);
@@ -245,6 +253,8 @@ export default function Assets() {
   });
 
   const unitNameById = new Map((units || []).map(unit => [unit.id, unit.name]));
+  const assets = assetsPage?.items || [];
+  const assetTotal = assetsPage?.total || 0;
   const hasFilters = Boolean(q || unitId || type || risk || port || service || location || hasVulns || qualityIssue);
   const activeQualityIssue = qualityIssue ? QUALITY_ISSUE_META[qualityIssue] : null;
   const unitOptions = [
@@ -442,7 +452,7 @@ export default function Assets() {
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
-          message={`${activeQualityIssue.label}：${assets?.length || 0} 个`}
+          message={`${activeQualityIssue.label}：${assetTotal} 个`}
           description={
             <Space direction="vertical" size={8}>
               <Typography.Text>{activeQualityIssue.description}</Typography.Text>
@@ -504,9 +514,20 @@ export default function Assets() {
         </Popover>
       </Space>
       {isLoading ? <Spin size="large" style={{ display: 'block', margin: '10vh auto' }} /> : (
-        <Table dataSource={assets || []} columns={columns} rowKey="id" style={{ background: '#fff', borderRadius: 14 }}
+        <Table dataSource={assets} columns={columns} rowKey="id" style={{ background: '#fff', borderRadius: 14 }}
           rowSelection={canEdit ? { selectedRowKeys: selectedAssetIds, onChange: setSelectedAssetIds } : undefined}
           scroll={{ x: 1180 }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: assetTotal,
+            showSizeChanger: true,
+            showTotal: total => `共 ${total} 条`,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              setPageSize(nextPageSize);
+            },
+          }}
           locale={{ emptyText: hasFilters ? '未找到匹配的资产' : '暂无资产数据，请先同步 Space 数据' }} />
       )}
 

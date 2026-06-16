@@ -4,7 +4,7 @@ import { SafetyOutlined, SearchOutlined, ExpandAltOutlined, ReloadOutlined } fro
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import apiClient from '@/api/client';
-import type { Vulnerability, Asset, Unit } from '@/types';
+import type { Vulnerability, Asset, PaginatedResponse, Unit } from '@/types';
 
 type VulnerabilityAsset = Asset & {
   unit_name?: string;
@@ -54,6 +54,8 @@ export default function Vulnerabilities() {
   const [unitId, setUnitId] = useState('');
   const [assetId, setAssetId] = useState('');
   const [ip, setIp] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingVuln, setEditingVuln] = useState<Vulnerability | null>(null);
 
@@ -64,10 +66,16 @@ export default function Vulnerabilities() {
     setPocStatus(nextPocStatus);
   }, [searchParams]);
 
-  const { data: vulns, isLoading } = useQuery<Vulnerability[]>({
-    queryKey: ['vulns', q, severity, status, pocStatus, unitId, assetId, ip],
+  useEffect(() => {
+    setPage(1);
+  }, [q, severity, status, pocStatus, unitId, assetId, ip]);
+
+  const { data: vulnsPage, isLoading } = useQuery<PaginatedResponse<Vulnerability>>({
+    queryKey: ['vulns', q, severity, status, pocStatus, unitId, assetId, ip, page, pageSize],
     queryFn: async () => {
       const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('page_size', String(pageSize));
       if (q) params.set('q', q);
       if (severity) params.set('severity', severity);
       if (status) params.set('status', status);
@@ -80,10 +88,10 @@ export default function Vulnerabilities() {
     },
   });
 
-  const { data: assets } = useQuery<Asset[]>({
-    queryKey: ['assets'],
+  const { data: assetOptionsPage } = useQuery<PaginatedResponse<Asset>>({
+    queryKey: ['asset-options'],
     queryFn: async () => {
-      const { data } = await apiClient.get('/assets/');
+      const { data } = await apiClient.get('/assets/?page=1&page_size=500');
       return data;
     },
   });
@@ -120,7 +128,10 @@ export default function Vulnerabilities() {
     },
   });
 
-  const assetsById = new Map((assets || []).map(asset => [asset.id, asset]));
+  const vulns = vulnsPage?.items || [];
+  const vulnTotal = vulnsPage?.total || 0;
+  const assets = assetOptionsPage?.items || [];
+  const assetsById = new Map(assets.map(asset => [asset.id, asset]));
   const unitNameById = new Map((units || []).map(unit => [unit.id, unit.name]));
   const hasFilters = Boolean(q || severity || status || pocStatus || unitId || assetId || ip);
 
@@ -208,7 +219,7 @@ export default function Vulnerabilities() {
         <Select placeholder="单位名称" value={unitId || undefined} onChange={value => setUnitId(value || '')} style={{ width: 180 }} allowClear
           options={(units || []).map(unit => ({ value: unit.id, label: unit.name }))} showSearch optionFilterProp="label" />
         <Select placeholder="资产" value={assetId || undefined} onChange={value => setAssetId(value || '')} style={{ width: 180 }} allowClear
-          options={(assets || []).map(asset => ({ value: asset.id, label: `${asset.ip} ${asset.name}` }))} showSearch optionFilterProp="label" />
+          options={assets.map(asset => ({ value: asset.id, label: `${asset.ip} ${asset.name}` }))} showSearch optionFilterProp="label" />
         <Input placeholder="资产 IP" value={ip} onChange={e => setIp(e.target.value)} style={{ width: 140, borderRadius: 10 }} allowClear />
         <Select placeholder="严重等级" value={severity || undefined} onChange={value => setSeverity(value || '')} style={{ width: 120 }} allowClear
           options={['严重','高危','中危','低危'].map(v=>({value:v,label:v}))} />
@@ -223,8 +234,19 @@ export default function Vulnerabilities() {
         <Button disabled={!hasFilters} onClick={resetFilters}>重置</Button>
       </Space>
       {isLoading ? <Spin size="large" style={{ display: 'block', margin: '10vh auto' }} /> : (
-        <Table dataSource={vulns || []} columns={columns} rowKey="id" style={{ background: '#fff', borderRadius: 14 }}
+        <Table dataSource={vulns} columns={columns} rowKey="id" style={{ background: '#fff', borderRadius: 14 }}
           scroll={{ x: 1280 }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: vulnTotal,
+            showSizeChanger: true,
+            showTotal: total => `共 ${total} 条`,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage);
+              setPageSize(nextPageSize);
+            },
+          }}
           locale={{ emptyText: hasFilters ? '未找到匹配的漏洞' : '暂无漏洞数据' }}
           expandable={{
             expandedRowRender: (record) => {

@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import false, or_, select
+from sqlalchemy import false, func, or_, select
 from app.database import get_db
 from app.services.auth import require_operator, require_reader
 from app.models.user import User
@@ -136,7 +136,7 @@ async def _validate_vuln_payload(db: AsyncSession, body: VulnerabilityCreate) ->
             raise HTTPException(status_code=404, detail=f"影响资产不存在：{missing[0]}")
 
 
-@router.get("/", response_model=list[VulnerabilityRead])
+@router.get("/")
 async def list_vulns(
     q: str = Query(""),
     severity: str = Query(""),
@@ -146,6 +146,8 @@ async def list_vulns(
     asset_id: str = Query(""),
     unit_id: str = Query(""),
     ip: str = Query(""),
+    page: int = Query(0, ge=0),
+    page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_reader),
 ):
@@ -189,8 +191,16 @@ async def list_vulns(
         else:
             stmt = stmt.where(false())
     stmt = stmt.order_by(Vulnerability.cvss.desc(), Vulnerability.created_at.desc())
+    total = None
+    if page:
+        total_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+        total = (await db.execute(total_stmt)).scalar() or 0
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(stmt)
-    return [VulnerabilityRead.model_validate(vuln) for vuln in result.scalars().all()]
+    items = [VulnerabilityRead.model_validate(vuln) for vuln in result.scalars().all()]
+    if page:
+        return {"items": items, "total": total or 0, "page": page, "page_size": page_size}
+    return items
 
 
 @router.get("/{vuln_id}", response_model=VulnerabilityRead)

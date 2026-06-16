@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -38,21 +40,40 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db), _=Depends(requ
     )).scalar() or 0
 
     units = list((await db.execute(select(Unit))).scalars().all())
-    assets = list((await db.execute(select(Asset))).scalars().all())
-    vulns = list((await db.execute(select(Vulnerability))).scalars().all())
-    assets_by_unit: dict[str, list[Asset]] = {}
-    for asset in assets:
-        assets_by_unit.setdefault(asset.unit_id, []).append(asset)
+    asset_rows = list((await db.execute(select(Asset.id, Asset.unit_id))).all())
+    asset_unit_by_id = {asset_id: unit_id for asset_id, unit_id in asset_rows if unit_id}
+    asset_count_by_unit: dict[str, int] = defaultdict(int)
+    for _asset_id, unit_id in asset_rows:
+        if unit_id:
+            asset_count_by_unit[unit_id] += 1
 
+    vuln_rows = list((await db.execute(select(Vulnerability.severity, Vulnerability.asset_ids))).all())
     severity_weight = {"严重": 10, "高危": 7, "中危": 4, "低危": 1}
+    vuln_count_by_unit: dict[str, int] = defaultdict(int)
+    critical_count_by_unit: dict[str, int] = defaultdict(int)
+    high_count_by_unit: dict[str, int] = defaultdict(int)
+    vuln_score_by_unit: dict[str, int] = defaultdict(int)
+    for severity, asset_ids in vuln_rows:
+        impacted_unit_ids = {
+            asset_unit_by_id[asset_id]
+            for asset_id in (asset_ids or [])
+            if asset_id in asset_unit_by_id
+        }
+        for unit_id in impacted_unit_ids:
+            vuln_count_by_unit[unit_id] += 1
+            if severity == "严重":
+                critical_count_by_unit[unit_id] += 1
+            elif severity == "高危":
+                high_count_by_unit[unit_id] += 1
+            vuln_score_by_unit[unit_id] += severity_weight.get(severity, 1)
+
     top_risk_units = []
     for unit in units:
-        unit_assets = assets_by_unit.get(unit.id, [])
-        asset_ids = {asset.id for asset in unit_assets}
-        unit_vulns = [v for v in vulns if asset_ids.intersection(set(v.asset_ids or []))]
-        critical_count = sum(1 for v in unit_vulns if v.severity == "严重")
-        high_count = sum(1 for v in unit_vulns if v.severity == "高危")
-        score = len(unit_assets) + sum(severity_weight.get(v.severity, 1) for v in unit_vulns)
+        asset_count = asset_count_by_unit.get(unit.id, 0)
+        vuln_count = vuln_count_by_unit.get(unit.id, 0)
+        critical_count = critical_count_by_unit.get(unit.id, 0)
+        high_count = high_count_by_unit.get(unit.id, 0)
+        score = asset_count + vuln_score_by_unit.get(unit.id, 0)
         top_risk_units.append({
             "id": unit.id,
             "name": unit.name,
@@ -67,8 +88,8 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db), _=Depends(requ
             "last_sync": unit.last_sync,
             "created_at": unit.created_at,
             "updated_at": unit.updated_at,
-            "asset_count": len(unit_assets),
-            "vuln_count": len(unit_vulns),
+            "asset_count": asset_count,
+            "vuln_count": vuln_count,
             "critical_vuln": critical_count,
             "high_vuln": high_count,
             "score": score,

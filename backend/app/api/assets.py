@@ -74,7 +74,7 @@ def _asset_matches_quality_issue(asset: Asset, issue: str) -> bool:
     return True
 
 
-@router.get("/", response_model=list[AssetRead])
+@router.get("/")
 async def list_assets(
     q: str = Query(""),
     type: str = Query(""),
@@ -86,6 +86,8 @@ async def list_assets(
     isp: str = Query(""),
     has_vulns: str = Query(""),
     quality_issue: str = Query(""),
+    page: int = Query(0, ge=0),
+    page_size: int = Query(50, ge=1, le=500),
     db: AsyncSession = Depends(get_db), _: User = Depends(require_reader),
 ):
     stmt = select(Asset)
@@ -131,12 +133,34 @@ async def list_assets(
         stmt = stmt.where(func.jsonb_array_length(Asset.raw_data) == 0)
     elif quality_issue and quality_issue not in {"missing_coordinates", "missing_manufacturer"}:
         raise HTTPException(status_code=400, detail="不支持的数据质量筛选项")
-    stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
-    result = await db.execute(stmt)
-    assets = list(result.scalars().all())
     if quality_issue in {"missing_coordinates", "missing_manufacturer"}:
+        stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
+        result = await db.execute(stmt)
+        assets = list(result.scalars().all())
         assets = [asset for asset in assets if _asset_matches_quality_issue(asset, quality_issue)]
-    return [AssetRead.model_validate(a) for a in assets]
+        if page:
+            start = (page - 1) * page_size
+            end = start + page_size
+            return {
+                "items": [AssetRead.model_validate(a) for a in assets[start:end]],
+                "total": len(assets),
+                "page": page,
+                "page_size": page_size,
+            }
+        return [AssetRead.model_validate(a) for a in assets]
+
+    stmt = stmt.order_by(Asset.last_seen.desc().nullslast())
+    total = None
+    if page:
+        total_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+        total = (await db.execute(total_stmt)).scalar() or 0
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+
+    result = await db.execute(stmt)
+    items = [AssetRead.model_validate(a) for a in result.scalars().all()]
+    if page:
+        return {"items": items, "total": total or 0, "page": page, "page_size": page_size}
+    return items
 
 
 @router.get("/quality/summary")
