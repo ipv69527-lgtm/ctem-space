@@ -1,5 +1,3 @@
-import ipaddress
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -9,6 +7,7 @@ from app.models.unit import Unit, UnitStatus
 from app.schemas.unit import UnitCreate, UnitRead
 from app.services.auth import require_operator, require_reader
 from app.services.audit import write_audit_log
+from app.services.unit_ip_ranges import clean_list, complete_unit_ip_ranges, merge_unit_ip_ranges
 from app.models.user import User
 
 router = APIRouter()
@@ -16,9 +15,9 @@ router = APIRouter()
 
 def _unit_values(body: UnitCreate) -> dict:
     values = body.model_dump()
-    values["ip_ranges"] = _clean_list(values.get("ip_ranges"))
-    values["aliases"] = _clean_list(values.get("aliases"))
-    values["keywords"] = _clean_list(values.get("keywords"))
+    values["ip_ranges"] = clean_list(values.get("ip_ranges"))
+    values["aliases"] = clean_list(values.get("aliases"))
+    values["keywords"] = clean_list(values.get("keywords"))
     try:
         values["status"] = UnitStatus(values.get("status") or "active")
     except ValueError:
@@ -26,58 +25,11 @@ def _unit_values(body: UnitCreate) -> dict:
     return values
 
 
-def _clean_list(values) -> list[str]:
-    items: list[str] = []
-    for item in values or []:
-        text = str(item or "").strip()
-        if text and text not in items:
-            items.append(text)
-    return items
-
-
 async def _ensure_unique_code(db: AsyncSession, code: str, exclude_id: str = "") -> None:
     result = await db.execute(select(Unit).where(Unit.code == code))
     existing = result.scalar_one_or_none()
     if existing and existing.id != exclude_id:
         raise HTTPException(status_code=409, detail="单位编码已存在")
-
-
-def _normal_ip(value: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    try:
-        return str(ipaddress.ip_address(text))
-    except ValueError:
-        return ""
-
-
-def _ip_sort_key(value: str) -> tuple[int, int]:
-    address = ipaddress.ip_address(value)
-    return (address.version, int(address))
-
-
-def _sorted_asset_ips(values: list[str]) -> list[str]:
-    return sorted({ip for ip in (_normal_ip(value) for value in values) if ip}, key=_ip_sort_key)
-
-
-def _merge_unit_ip_ranges(unit: Unit, asset_ips: list[str]) -> dict:
-    current = _clean_list(unit.ip_ranges or [])
-    suggested = _sorted_asset_ips(asset_ips)
-    added = [ip for ip in suggested if ip not in current]
-    merged = [*current, *added]
-    return {
-        "unit_id": unit.id,
-        "unit_name": unit.name,
-        "asset_count": len(suggested),
-        "existing_count": len(current),
-        "new_count": len(added),
-        "before_count": len(current),
-        "after_count": len(merged),
-        "ip_ranges": suggested,
-        "added_ip_ranges": added,
-        "merged_ip_ranges": merged,
-    }
 
 
 @router.get("/", response_model=list[UnitRead])
@@ -111,12 +63,11 @@ async def batch_complete_unit_ip_ranges(
         if unit_id:
             ips_by_unit.setdefault(unit_id, []).append(ip)
 
-    rows = [_merge_unit_ip_ranges(unit, ips_by_unit.get(unit.id, [])) for unit in units]
+    rows = [merge_unit_ip_ranges(unit, ips_by_unit.get(unit.id, [])) for unit in units]
     changed_rows = [row for row in rows if row["new_count"] > 0]
     if not dry_run:
-        units_by_id = {unit.id: unit for unit in units}
-        for row in changed_rows:
-            units_by_id[row["unit_id"]].ip_ranges = row["merged_ip_ranges"]
+        rows = complete_unit_ip_ranges(units, ips_by_unit)
+        changed_rows = [row for row in rows if row["new_count"] > 0]
         await write_audit_log(
             db,
             action="unit.ip_ranges.batch_complete",
@@ -171,7 +122,7 @@ async def suggest_unit_ip_ranges(
         raise HTTPException(status_code=404, detail="Unit not found")
 
     asset_rows = await db.execute(select(Asset.ip).where(Asset.unit_id == unit_id))
-    row = _merge_unit_ip_ranges(unit, [item[0] for item in asset_rows.all()])
+    row = merge_unit_ip_ranges(unit, [item[0] for item in asset_rows.all()])
     return {
         "unit_id": unit.id,
         "unit_name": unit.name,

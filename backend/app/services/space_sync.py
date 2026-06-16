@@ -18,6 +18,8 @@ from app.models.space_config import SpaceConfig
 from app.models.sync_task import SyncTask
 from app.models.unit import Unit, UnitStatus
 from app.models.vulnerability import Vulnerability
+from app.services.audit import write_audit_log
+from app.services.unit_ip_ranges import complete_unit_ip_ranges
 
 ASSET_PATH_FALLBACKS = ("api/asset/select/query", "api/v1/assets", "api/assets", "assets")
 VULNERABILITY_PATH_FALLBACKS = ("api/v1/vulnerabilities", "api/vulnerabilities", "vulnerabilities")
@@ -1017,6 +1019,7 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
             raw_assets, raw_vulns = await _fetch_space(config, unit, query=task.query_condition)
             task.fetched_assets = len(raw_assets)
             synced_asset_ids: set[str] = set()
+            synced_unit_ips: dict[str, set[str]] = {}
             vuln_count = 0
             asset_ids_by_key: dict[str, str] = {}
             units = list((await db.execute(select(Unit))).scalars().all())
@@ -1078,6 +1081,8 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
                     await _record_asset_change(db, asset, "update", _asset_changes(before, asset))
                 asset_ids_by_key[ip] = asset.id
                 synced_asset_ids.add(asset.id)
+                if asset.unit_id:
+                    synced_unit_ips.setdefault(asset.unit_id, set()).add(asset.ip)
 
                 linked_ids = set(asset.vuln_ids or [])
                 for vuln_raw in _asset_vulns(raw):
@@ -1093,8 +1098,40 @@ async def run_space_sync(task_id: str) -> dict[str, int]:
                     await _upsert_vuln(db, raw, asset_id)
                     vuln_count += 1
 
+            units_by_id = {item.id: item for item in units}
+            ip_range_rows = complete_unit_ip_ranges(
+                [units_by_id[unit_id] for unit_id in synced_unit_ips if unit_id in units_by_id],
+                synced_unit_ips,
+            )
+            ip_range_changed_rows = [row for row in ip_range_rows if row["new_count"] > 0]
+            added_ip_count = sum(row["new_count"] for row in ip_range_changed_rows)
+            if added_ip_count:
+                await write_audit_log(
+                    db,
+                    action="unit.ip_ranges.sync_complete",
+                    target_type="sync_task",
+                    target_id=task.id,
+                    target_name="同步自动补全单位IP范围",
+                    detail={
+                        "task_id": task.id,
+                        "unit_id": task.unit_id,
+                        "updated_units": len(ip_range_changed_rows),
+                        "added_ip_count": added_ip_count,
+                        "items": [
+                            {
+                                "unit_id": row["unit_id"],
+                                "unit_name": row["unit_name"],
+                                "added": row["added_ip_ranges"],
+                            }
+                            for row in ip_range_changed_rows[:100]
+                        ],
+                    },
+                    username="system",
+                )
+
             task.status = "success"
-            task.message = f"同步完成：资产 {len(synced_asset_ids)} 个，漏洞 {vuln_count} 条"
+            suffix = f"，补全IP范围 {added_ip_count} 个" if added_ip_count else ""
+            task.message = f"同步完成：资产 {len(synced_asset_ids)} 个，漏洞 {vuln_count} 条{suffix}"
             task.synced_assets = len(synced_asset_ids)
             task.synced_vulns = vuln_count
             task.error_detail = ""
