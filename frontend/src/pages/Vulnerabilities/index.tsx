@@ -283,6 +283,7 @@ export default function Vulnerabilities() {
           }}
           locale={{ emptyText: hasFilters ? '未找到匹配的漏洞' : '暂无漏洞数据' }}
           expandable={{
+            expandedRowKeys: expandedId ? [expandedId] : [],
             expandedRowRender: (record) => {
               if (expandedId !== record.id) return null;
               return (
@@ -323,6 +324,7 @@ export default function Vulnerabilities() {
               );
             },
             onExpand: (expanded, record) => setExpandedId(expanded ? record.id : null),
+            onExpandedRowsChange: keys => setExpandedId(keys.length ? String(keys[keys.length - 1]) : null),
             expandIcon: () => <Button type="link" size="small" icon={<ExpandAltOutlined />} />,
           }}
         />
