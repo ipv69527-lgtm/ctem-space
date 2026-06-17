@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Typography, Table, Spin, Tag, Input, Select, Space, Button, Modal, Form, message } from 'antd';
 import { SafetyOutlined, SearchOutlined, ExpandAltOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import apiClient from '@/api/client';
 import type { Vulnerability, Asset, PaginatedResponse, Unit } from '@/types';
 
@@ -44,6 +44,7 @@ function vulnerabilityDescription(record: Vulnerability) {
 }
 
 export default function Vulnerabilities() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [form] = Form.useForm();
@@ -62,8 +63,14 @@ export default function Vulnerabilities() {
   useEffect(() => {
     const nextQ = searchParams.get('q') || '';
     const nextPocStatus = searchParams.get('poc_status') || '';
+    const nextUnitId = searchParams.get('unit_id') || '';
+    const nextAssetId = searchParams.get('asset_id') || '';
+    const nextIp = searchParams.get('ip') || '';
     setQ(nextQ);
     setPocStatus(nextPocStatus);
+    setUnitId(nextUnitId);
+    setAssetId(nextAssetId);
+    setIp(nextIp);
   }, [searchParams]);
 
   useEffect(() => {
@@ -132,7 +139,7 @@ export default function Vulnerabilities() {
   const vulnTotal = vulnsPage?.total || 0;
   const assets = assetOptionsPage?.items || [];
   const assetsById = new Map(assets.map(asset => [asset.id, asset]));
-  const unitNameById = new Map((units || []).map(unit => [unit.id, unit.name]));
+  const unitById = new Map((units || []).map(unit => [unit.id, unit]));
   const hasFilters = Boolean(q || severity || status || pocStatus || unitId || assetId || ip);
 
   const resetFilters = () => {
@@ -156,8 +163,23 @@ export default function Vulnerabilities() {
     statusMutation.mutate({ id: editingVuln.id, values });
   };
 
+  const toggleExpanded = (id: string) => {
+    setExpandedId(current => current === id ? null : id);
+  };
+
+  const impactedUnitsForVuln = (record: Vulnerability) => {
+    const byId = new Map<string, Unit>();
+    for (const assetId of record.asset_ids || []) {
+      const linkedUnitId = assetsById.get(assetId)?.unit_id;
+      if (!linkedUnitId) continue;
+      const unit = unitById.get(linkedUnitId);
+      if (unit) byId.set(unit.id, unit);
+    }
+    return Array.from(byId.values());
+  };
+
   const columns = [
-    { title: '漏洞名称', dataIndex: 'title', key: 'title', width: 300, render: (v: string) => <strong>{v}</strong> },
+    { title: '漏洞名称', dataIndex: 'title', key: 'title', width: 300, render: (v: string, r: Vulnerability) => <a onClick={() => toggleExpanded(r.id)}><strong>{v}</strong></a> },
     { title: 'CVE', dataIndex: 'cve', key: 'cve', width: 160, render: (v: string) => <code>{v}</code> },
     {
       title: 'PoC',
@@ -193,11 +215,23 @@ export default function Vulnerabilities() {
       key: 'units',
       width: 180,
       render: (_: unknown, r: Vulnerability) => {
-        const names = Array.from(new Set((r.asset_ids || []).map(id => unitNameById.get(assetsById.get(id)?.unit_id || '')).filter(Boolean)));
-        return names.length ? names.map(name => <Tag key={name} color="blue">{name}</Tag>) : '-';
+        const impactedUnits = impactedUnitsForVuln(r);
+        return impactedUnits.length ? impactedUnits.map(unit => (
+          <Tag key={unit.id} color="blue" style={{ cursor: 'pointer' }} onClick={() => navigate(`/units/${unit.id}`)}>{unit.name}</Tag>
+        )) : '-';
       },
     },
-    { title: '影响资产', dataIndex: 'asset_ids', key: 'assets', width: 100, render: (v: string[]) => <span style={{ color: '#1677ff', fontWeight: 600 }}>{v?.length || 0} 个</span> },
+    {
+      title: '影响资产',
+      dataIndex: 'asset_ids',
+      key: 'assets',
+      width: 120,
+      render: (v: string[], r: Vulnerability) => (
+        <Button type="link" size="small" onClick={() => toggleExpanded(r.id)}>
+          {v?.length || 0} 个
+        </Button>
+      ),
+    },
     { title: '首次发现', dataIndex: 'first_found', key: 'first_found', width: 120, render: (v: string|null) => v ? new Date(v).toLocaleDateString('zh-CN') : '-' },
     { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (v: string) => <Tag color={statusColors[v] || 'default'}>{v}</Tag> },
     {
@@ -264,9 +298,14 @@ export default function Vulnerabilities() {
                   <p style={{ fontWeight: 600, marginBottom: 4, fontSize: 12 }}>受影响资产：</p>
                   <Space wrap>
                     {expandedAssets?.map((a) => (
-                      <Tag key={a.id} color="blue" style={{ cursor: 'pointer' }}
-                        onClick={() => window.open(`/assets/${a.id}`, '_self')}>
-                        {a.unit_name ? `${a.unit_name} / ` : ''}{a.name} ({a.ip})
+                      <Tag key={a.id} color="blue">
+                        {a.unit_id && a.unit_name && (
+                          <>
+                            <a onClick={() => navigate(`/units/${a.unit_id}`)}>{a.unit_name}</a>
+                            {' / '}
+                          </>
+                        )}
+                        <a onClick={() => navigate(`/assets/${a.id}`)}>{a.name} ({a.ip})</a>
                       </Tag>
                     ))}
                     {(!expandedAssets || expandedAssets.length === 0) && <span style={{ color: '#8c8c8c' }}>无关联资产</span>}

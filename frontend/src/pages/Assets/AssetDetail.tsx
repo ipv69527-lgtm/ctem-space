@@ -290,8 +290,8 @@ export default function AssetDetail() {
           dataSource={vulns || []}
           rowKey="id"
           columns={[
-            { title: '漏洞名称', dataIndex: 'title', key: 'title', width: 280, render: (v: string) => <strong>{v}</strong> },
-            { title: 'CVE', dataIndex: 'cve', key: 'cve', render: (v: string) => <code>{v}</code> },
+            { title: '漏洞名称', dataIndex: 'title', key: 'title', width: 280, render: (v: string, r: Vulnerability) => <a onClick={() => navigate(`/vulnerabilities?q=${encodeURIComponent(r.cve || v)}`)}><strong>{v}</strong></a> },
+            { title: 'CVE', dataIndex: 'cve', key: 'cve', render: (v: string) => v ? <a onClick={() => navigate(`/vulnerabilities?q=${encodeURIComponent(v)}`)}><code>{v}</code></a> : '-' },
             {
               title: '漏洞描述',
               dataIndex: 'desc',

@@ -396,7 +396,7 @@ export default function Assets() {
   const allColumns = [
     { title: '名称', dataIndex: 'name', key: 'name', render: (v: string, r: Asset) => <a onClick={() => navigate(`/assets/${r.id}`)}>{v}</a> },
     { title: 'IP', dataIndex: 'ip', key: 'ip', render: (v: string) => <code>{v}</code> },
-    { title: '单位名称', dataIndex: 'unit_id', key: 'unit_name', render: (v: string | null) => v ? (unitNameById.get(v) || '-') : <Tag>未归属</Tag> },
+    { title: '单位名称', dataIndex: 'unit_id', key: 'unit_name', render: (v: string | null) => v ? <a onClick={() => navigate(`/units/${v}`)}>{unitNameById.get(v) || v}</a> : <Tag>未归属</Tag> },
     { title: '类型', dataIndex: 'type', key: 'type' },
     { title: '端口', dataIndex: 'ports', key: 'ports', ellipsis: true, render: (v: string) => v ? <code>{v}</code> : '-' },
     { title: '服务', dataIndex: 'services', key: 'services', ellipsis: true, render: (v: string) => v || '-' },
@@ -419,7 +419,7 @@ export default function Assets() {
     { title: '应用/产品', key: 'product', ellipsis: true, render: (_: unknown, r: Asset) => r.product || appInfoValue(r, ['name']) || rawValue(r, ['product', 'app']) || '-' },
     { title: '设备', key: 'device', ellipsis: true, render: (_: unknown, r: Asset) => r.device || rawValue(r, ['device']) || '-' },
     { title: '设备类型', key: 'device_type', render: (_: unknown, r: Asset) => r.device_type || rawValue(r, ['device_type']) || '-' },
-    { title: '漏洞数', key: 'vuln_count', render: (_: unknown, r: Asset) => <span style={{ color: '#1677ff', fontWeight: 600 }}>{r.vuln_ids?.length || 0}</span> },
+    { title: '漏洞数', key: 'vuln_count', render: (_: unknown, r: Asset) => r.vuln_ids?.length ? <a onClick={() => navigate(`/vulnerabilities?asset_id=${r.id}`)} style={{ fontWeight: 600 }}>{r.vuln_ids.length}</a> : <span style={{ color: '#8c8c8c' }}>0</span> },
     { title: '原始记录', key: 'raw_count', render: (_: unknown, r: Asset) => rawItems(r).length },
     { title: '最近发现', dataIndex: 'last_seen', key: 'last_seen', render: (v: string|null) => v ? new Date(v).toLocaleString('zh-CN') : '-' },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at', render: (v: string|null) => v ? new Date(v).toLocaleString('zh-CN') : '-' },

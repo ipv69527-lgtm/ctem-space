@@ -166,8 +166,8 @@ export default function UnitDetail() {
           key: 'vulns', label: `漏洞列表（${vulns?.length || 0}）`,
           children: <Table dataSource={vulns || []} rowKey="id" size="small"
             columns={[
-              { title: '标题', dataIndex: 'title' },
-              { title: 'CVE', dataIndex: 'cve', render: (v: string) => <code>{v}</code> },
+              { title: '标题', dataIndex: 'title', render: (v: string, r: Vulnerability) => <a onClick={() => navigate(`/vulnerabilities?q=${encodeURIComponent(r.cve || v)}`)}>{v}</a> },
+              { title: 'CVE', dataIndex: 'cve', render: (v: string) => v ? <a onClick={() => navigate(`/vulnerabilities?q=${encodeURIComponent(v)}`)}><code>{v}</code></a> : '-' },
               { title: 'CVSS', dataIndex: 'cvss', render: (v: number) => <span style={{ fontWeight: 700, color: v >= 9 ? '#ea4335' : '#333' }}>{v?.toFixed(1)}</span> },
               { title: '等级', dataIndex: 'severity', render: (v: string) => <Tag color={riskColors[v]}>{v}</Tag> },
               { title: '状态', dataIndex: 'status', render: (v: string) => <Tag color={vulnStatusColors[v] || 'default'}>{v}</Tag> },
